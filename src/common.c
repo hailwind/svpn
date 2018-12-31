@@ -438,7 +438,7 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd)
 
 int _check_kcp(kcpsess_t *kcps)
 {
-    if (!kcps->kcp || kcps->kcp->state == -1)
+    if (!kcps->kcp)
     {
         pthread_mutex_lock(&kcps->ikcp_mutex);
         _init_kcp(kcps);
@@ -652,7 +652,7 @@ void *readdev(void *data)
         {
             logging("readdev", "read data from tap, len: %d", frame->len);
             rqueue_write(kcps->dev2kcp_queue, frame);
-            pthread_kill(kcps->writeudpt, SIGRTMIN + 1);
+            pthread_kill(kcps->writekcpt, SIGRTMIN + 1);
         }
         else
         {
@@ -672,7 +672,7 @@ void *readdev(void *data)
 12,13 int16 帧6的长度
 14,15 int16 帧7的长度
 */
-void *writeudp(void *data)
+void *writekcp(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
     if (pthread_sigmask(SIG_BLOCK, &kcps->writeudp_sigset, NULL) != 0)
@@ -711,7 +711,6 @@ void *writeudp(void *data)
             }
             pthread_mutex_lock(&kcps->ikcp_mutex);
             ikcp_send(kcps->kcp, buff, len);
-            ikcp_update(kcps->kcp, iclock());
             pthread_mutex_unlock(&kcps->ikcp_mutex);
         }
     }
@@ -733,4 +732,29 @@ int udp_output(const char *buf, int len, ikcpcb *kcp, void *user)
     }
     logging("udp_output", "kcp.state: %d ", kcp->state);
     return 0;
+}
+
+void kcpupdate(kcpsess_t *kcps)
+{
+    if (kcps->kcp) {
+        pthread_mutex_lock(&kcps->ikcp_mutex);
+        ikcp_update(kcps->kcp, iclock());
+        pthread_mutex_unlock(&kcps->ikcp_mutex);
+    }
+}
+
+int check_item(hashtable_t *table, void *key, size_t klen, void *value, size_t vlen, void *user) {
+    kcpupdate((kcpsess_t *)value);
+    return 1;
+}
+
+void * kcpupdate_server(void *data)
+{
+    hashtable_t *conn_m = (hashtable_t *)data;
+    while (1)
+    {
+        int check_item_count = 0;
+        ht_foreach_pair(conn_m, check_item, &check_item_count);
+        isleep(1);
+    }
 }

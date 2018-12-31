@@ -98,7 +98,7 @@ struct _kcpsess_st
 
     pthread_t writedevt;
     pthread_t readdevt;
-    pthread_t writeudpt;
+    pthread_t writekcpt;
     pthread_mutex_t ikcp_mutex;
 
     sigset_t writeudp_sigset;
@@ -168,7 +168,11 @@ void *writedev(void *data);
 
 void *readdev(void *data);
 
-void *writeudp(void *data);
+void *writekcp(void *data);
+
+void *kcpupdate_server(void *data);
+
+void kcpupdate(kcpsess_t *kcps);
 
 /* get system time */
 static inline void itimeofday(long *sec, long *usec)

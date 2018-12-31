@@ -155,7 +155,7 @@ void start_conv(action_t *action)
         sigaddset(&kcps->writedev_sigset, SIGRTMIN);
         start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
         start_thread(&kcps->writedevt, "writedev", writedev, (void *)kcps);
-        start_thread(&kcps->writeudpt, "writeudp", writeudp, (void *)kcps);
+        start_thread(&kcps->writekcpt, "writekcp", writekcp, (void *)kcps);
         ht_set(conv_session_map, action->conv, length(action->conv), kcps, sizeof(kcpsess_t));
         logging("notice", "server init_kcpsess conv: %s key: %s kcps: %p", action->conv, action->key, kcps);
     }
@@ -175,7 +175,7 @@ void stop_conv(action_t *action)
         kcps->dead = 1;
         stop_thread(kcps->readdevt);
         stop_thread(kcps->writedevt);
-        stop_thread(kcps->writeudpt);
+        stop_thread(kcps->writekcpt);
         if (kcps->dev_fd > 0)
             close(kcps->dev_fd);
         if (kcps->kcp)
@@ -316,5 +316,7 @@ int main(int argc, char *argv[])
         start_thread(&server->readudpt, temp, readudp_server, (void *)server);
         mPtr = strtok(NULL, ",");
     }
+    pthread_t kcpupdatet;
+    start_thread(&kcpupdatet, "kcpupdate", kcpupdate_server, (void *)conv_session_map);
     wait_conv(server_addr, server_port);
 }

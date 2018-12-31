@@ -22,9 +22,11 @@ void handle(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
     start_thread(&readudpt, "readudp", readudp_client, (void *)kcps);
     start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
     start_thread(&kcps->writedevt, "writedev", writedev, (void *)kcps);
-    start_thread(&kcps->writeudpt, "writeudp", writeudp, (void *)kcps);
-    while(1) {
-        sleep(60);
+    start_thread(&kcps->writekcpt, "writeudp", writekcp, (void *)kcps);
+    while (1)
+    {
+        kcpupdate(kcps);
+        isleep(1);
     }
 }
 
