@@ -43,6 +43,9 @@ rqueue.o:
 rbtree.o:
 	$(CC) -g -rdynamic -c src/lib/rbtree.c -o bin/rbtree.o
 
+rbuf.o:
+	$(CC) -g -rdynamic -c src/lib/rbuf.c -o bin/rbuf.o
+
 deb:
 	mkdir -p chroot/opt/sedge/vpn
 	mkdir -p chroot/var/log/sedge
