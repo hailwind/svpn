@@ -316,11 +316,11 @@ int main(int argc, char *argv[])
         server->sock_fd = sock_fd;
         server->conn_map = conv_session_map;
         char temp[64];
-        sprintf(temp, "readudp_%d", cnt);
+        sprintf(temp, "readudp%d", cnt);
         start_thread(&server->readudpt, temp, readudp_server, (void *)server);
         mPtr = strtok(NULL, ",");
     }
     pthread_t kcpupdatet;
-    start_thread(&kcpupdatet, "kcpupdate", kcpupdate_server, (void *)conv_session_map);
+    start_thread(&kcpupdatet, "writeudp", kcpupdate_server, (void *)conv_session_map);
     wait_conv(server_addr, server_port);
 }

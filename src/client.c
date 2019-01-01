@@ -5,7 +5,7 @@ void print_help() {
     exit(0);
 }
 
-void handle(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
+void start_conv(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
 {
     int sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock_fd < 0)
@@ -23,11 +23,7 @@ void handle(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
     start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
     start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
     start_thread(&kcps->dev2kcpt, "dev2kcp", dev2kcp, (void *)kcps);
-    while (1)
-    {
-        kcpupdate(kcps);
-        isleep(1);
-    }
+    kcpupdate_client(kcps);
 }
 
 static const struct option long_option[]={
@@ -124,5 +120,5 @@ int main(int argc, char *argv[]) {
     ser_addr.sin_port = htons(server_port);
     logging("notice", "open server_addr: %s, server_port: %d, key: %s", server_addr, server_port, key);
 
-    handle(dev_fd, conv, &ser_addr, key);
+    start_conv(dev_fd, conv, &ser_addr, key);
 }

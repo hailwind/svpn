@@ -169,9 +169,9 @@ void *readdev(void *data);
 
 void *dev2kcp(void *data);
 
-void *kcpupdate_server(void *data);
+void kcpupdate_client(kcpsess_t *kcps);
 
-void kcpupdate(kcpsess_t *kcps);
+void *kcpupdate_server(void *data);
 
 /* get system time */
 static inline void itimeofday(long *sec, long *usec)
