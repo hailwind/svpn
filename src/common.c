@@ -818,6 +818,7 @@ void *dev2kcp(void *data)
             _check_kcp(kcps, true);
             pthread_mutex_lock(&kcps->ikcp_mutex);
             int y = ikcp_send(kcps->kcp, buff, len);
+            ikcp_flush(kcps->kcp);
             // ikcp_update(kcps->kcp, iclock());
             pthread_mutex_unlock(&kcps->ikcp_mutex);
             logging("dev2kcp", "ikcp_send: %d", len);
@@ -859,7 +860,7 @@ void kcpupdate_client(kcpsess_t *kcps) {
     while (1)
     {
         _kcpupdate(kcps);
-        isleep(1);
+        isleep(5);
     }
 }
 
@@ -876,6 +877,6 @@ void *kcpupdate_server(void *data)
     {
         int check_item_count = 0;
         ht_foreach_pair(conn_m, check_item, &check_item_count);
-        isleep(1);
+        isleep(5);
     }
 }
