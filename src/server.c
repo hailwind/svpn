@@ -16,7 +16,7 @@ void print_help()
 {
     printf("\
 //start a server process.\n\
-server --bind=192.168.1.2 [--port=8888] [--mode=3] [--with-lz4] [--no-crypt]  [--crypt-algo=twofish] [--crypt-mode=cbc] [--debug]\n\
+server --bind=192.168.1.2 [--port=8888] [--mode=3] [--with-lz4] [no-recombine] [--no-crypt]  [--crypt-algo=twofish] [--crypt-mode=cbc] [--debug]\n\
 //add a conv to a server, identify the server by ipaddr and port. \n\
 server --bind=192.168.1.2 [--port=8888] --add-conv=38837 --crypt-key=0123456789012345678901234567890\n\
 //del a conv from a server, identify the server by ipaddr and port. \n\
@@ -151,11 +151,11 @@ void start_conv(action_t *action)
     {
         int dev_fd = init_tap(atoi(action->conv));
         kcpsess_t *kcps = init_kcpsess(atoi(action->conv), dev_fd, action->key, -1);    //SERVER DONT NEED sock_fd
-        sigaddset(&kcps->writeudp_sigset, SIGRTMIN + 1);
-        sigaddset(&kcps->writedev_sigset, SIGRTMIN);
+        sigaddset(&kcps->dev2kcp_sigset, SIGRTMIN + 1);
+        sigaddset(&kcps->kcp2dev_sigset, SIGRTMIN);
         start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
-        start_thread(&kcps->writedevt, "writedev", writedev, (void *)kcps);
-        start_thread(&kcps->writekcpt, "writekcp", writekcp, (void *)kcps);
+        start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
+        start_thread(&kcps->dev2kcpt, "dev2kcp", dev2kcp, (void *)kcps);
         ht_set(conv_session_map, action->conv, length(action->conv), kcps, sizeof(kcpsess_t));
         logging("notice", "server init_kcpsess conv: %s key: %s kcps: %p", action->conv, action->key, kcps);
     }
@@ -174,8 +174,8 @@ void stop_conv(action_t *action)
         kcpsess_t *kcps = (kcpsess_t *)ht_get(conv_session_map, action->conv, length(action->conv), &data_len);
         kcps->dead = 1;
         stop_thread(kcps->readdevt);
-        stop_thread(kcps->writedevt);
-        stop_thread(kcps->writekcpt);
+        stop_thread(kcps->kcp2devt);
+        stop_thread(kcps->dev2kcpt);
         if (kcps->dev_fd > 0)
             close(kcps->dev_fd);
         if (kcps->kcp)
@@ -214,6 +214,7 @@ struct option long_option[] = {
     {"port", required_argument, NULL, 'p'},
     {"with-lz4", no_argument, NULL, 'Z'},
     {"no-crypt", no_argument, NULL, 'C'},
+    {"no-recombine", no_argument, NULL, 'R'},
     {"crypt-key", required_argument, NULL, 'k'},
     {"crypt-algo", required_argument, NULL, 'A'},
     {"crypt-mode", required_argument, NULL, 'M'},
@@ -243,6 +244,7 @@ int main(int argc, char *argv[])
     int role=SERVER; 
     int mode=3;
     int lz4=false; 
+    int recombine=true; //frame re recombine
     int debug=false; 
     int crypt=true; 
     char *crypt_algo=MCRYPT_TWOFISH; 
@@ -265,6 +267,8 @@ int main(int argc, char *argv[])
             server_port = atoi(optarg); break;
         case 'Z':
             lz4=true; break;
+        case 'R':
+            recombine=false; break;
         case 'C':
             crypt=false; break;
         case 'k':
@@ -290,7 +294,7 @@ int main(int argc, char *argv[])
         print_help();
         exit(1);
     }
-    init_global_config(role, mode, lz4, debug, crypt, crypt_algo, crypt_mode);
+    init_global_config(role, mode, lz4, recombine, debug, crypt, crypt_algo, crypt_mode);
     if (cmd && conv)
     {
         int fifo_fd = open_fifo(server_addr, server_port, 'W');

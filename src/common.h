@@ -2,19 +2,19 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdarg.h>
-
-#include <errno.h>
+#include <string.h>
+#include <ctype.h>
+#include <unistd.h>
 #include <time.h>
+#include <getopt.h>
+#include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
-#include <ctype.h>
-#include <string.h>
-#include <unistd.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <mcrypt.h>
 #include <lz4.h>
-#include <getopt.h>
 
 #include <sys/time.h>
 #include <sys/wait.h>
@@ -23,7 +23,6 @@
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
-
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <arpa/inet.h>
@@ -35,7 +34,7 @@
 
 #ifndef _SVPN_COMMON_
 
-#define ENABLED_LOG {"notice", "warning", "error", "init_tap", "init_mcrypt", "signal"}
+#define ENABLED_LOG {"notice", "warning", "error", "init_tap", "init_mcrypt"}
 #define DEFAULT_SERVER_PORT 8888
 
 #define SND_WINDOW 16384
@@ -96,19 +95,19 @@ struct _kcpsess_st
     struct sockaddr_in dst;
     socklen_t dst_len;
 
-    pthread_t writedevt;
+    pthread_t kcp2devt;
     pthread_t readdevt;
-    pthread_t writekcpt;
+    pthread_t dev2kcpt;
     pthread_mutex_t ikcp_mutex;
 
-    sigset_t writeudp_sigset;
-    sigset_t writedev_sigset;
+    sigset_t dev2kcp_sigset;
+    sigset_t kcp2dev_sigset;
 
     uint64_t last_alive_time;
     uint32_t latest_send_iclock;
 
-    mcrypt_t de_mcrypt_udp2dev;
-    mcrypt_t en_mcrypt_dev2udp;
+    mcrypt_t de_mcrypt;
+    mcrypt_t en_mcrypt;
 
     char write_dev_buff[RCV_BUFF_LEN];
     int write_dev_buff_len; 
@@ -134,7 +133,7 @@ typedef struct _server_listen_st server_listen_t;
 
 void init_ulimit();
 
-void init_global_config(int role, int mode, int lz4, int debug_param, int crypt, char *crypt_algo, char *crypt_mode);
+void init_global_config(int role, int mode, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode);
 
 void init_server_config(char *server_addr, int server_port);
 
@@ -164,11 +163,11 @@ void *readudp_client(void *data);
 
 void *readudp_server(void *data);
 
-void *writedev(void *data);
+void *kcp2dev(void *data);
 
 void *readdev(void *data);
 
-void *writekcp(void *data);
+void *dev2kcp(void *data);
 
 void *kcpupdate_server(void *data);
 
