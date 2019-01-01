@@ -1,4 +1,6 @@
+#define _GNU_SOURCE
 #include "common.h"
+#include <sched.h>
 
 #ifndef _COMMON_
 #define _COMMON_ 1
@@ -192,6 +194,34 @@ void start_thread(pthread_t *tid, char *name, void *func, void *param)
     {
         pthread_t x = *tid;
         _reg_thread(x, name);
+        // cpu_set_t mask;
+        // CPU_ZERO(&mask);
+        // if (global_main->role==SERVER) {
+        //     if (strncmp("readdev", name, 7)==0) {
+        //         CPU_SET(0, &mask);
+        //     }else if (strncmp("kcp2dev", name, 7)==0) {
+        //         CPU_SET(1, &mask);
+        //     }else if (strncmp("dev2kcp", name, 7)==0) {
+        //         CPU_SET(2, &mask);
+        //     }else if (strncmp("readudp", name, 7)==0) {
+        //         CPU_SET(4, &mask);
+        //     }else if (strncmp("writeudp", name, 8)==0) {
+        //         CPU_SET(3, &mask);
+        //     }
+        // }else{
+        //     if (strncmp("readdev", name, 7)==0) {
+        //         CPU_SET(5, &mask);
+        //     }else if (strncmp("kcp2dev", name, 7)==0) {
+        //         CPU_SET(6, &mask);
+        //     }else if (strncmp("dev2kcp", name, 7)==0) {
+        //         CPU_SET(7, &mask);
+        //     }else if (strncmp("readudp", name, 7)==0) {
+        //         CPU_SET(8, &mask);
+        //     }else if (strncmp("default", name, 7)==0) {
+        //         CPU_SET(9, &mask);
+        //     }
+        // }
+        // pthread_setaffinity_np(x, sizeof(mask), &mask);
         pthread_detach(x);
         logging("notice", "create %s thread: %ld", name, tid);
     }
@@ -819,7 +849,6 @@ void *dev2kcp(void *data)
             pthread_mutex_lock(&kcps->ikcp_mutex);
             int y = ikcp_send(kcps->kcp, buff, len);
             ikcp_flush(kcps->kcp);
-            // ikcp_update(kcps->kcp, iclock());
             pthread_mutex_unlock(&kcps->ikcp_mutex);
             logging("dev2kcp", "ikcp_send: %d", len);
         }

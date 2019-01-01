@@ -33,7 +33,6 @@
 #include "lib/rbtree.h"
 
 #ifndef _SVPN_COMMON_
-
 #define ENABLED_LOG {"notice", "warning", "error", "init_tap", "init_mcrypt"}
 #define DEFAULT_SERVER_PORT 8888
 
@@ -150,6 +149,8 @@ void set_fifo_fd(int param);
 void usr_signal(int signo);
 
 void exit_signal(int signo);
+
+void set_cpu_affinity();
 
 int init_tap(int conv);
 

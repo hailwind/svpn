@@ -303,8 +303,8 @@ int main(int argc, char *argv[])
         exit(0);
     }
     init_server_config(server_addr, server_port);
-    conv_session_map = ht_create(MAX_CONVS, 0, NULL);
 
+    conv_session_map = ht_create(MAX_CONVS, 0, NULL);
     char *mPtr = NULL;
     mPtr = strtok(server_addr, ",");
     int cnt = 0;
