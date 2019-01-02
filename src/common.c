@@ -453,54 +453,57 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd)
     pthread_mutex_t ikcp_mutex = PTHREAD_MUTEX_INITIALIZER;
     ps->ikcp_mutex = ikcp_mutex;
 
-    _init_mcrypt(&ps->de_mcrypt, ps->key);
-    _init_mcrypt(&ps->en_mcrypt, ps->key);
     ps->dev2kcp_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
+    ps->dev2kcpm_queue = rqueue_create(1024, RQUEUE_MODE_BLOCKING);
     logging("init_kcpsess", "kcps: %p", ps);
     return ps;
 }
 
-int _encrypt_encompress(kcpsess_t *kcps, char **buff, int *buff_len)
+int _encrypt_encompress(kcpsess_t *kcps, mcrypt_t en_mcrypt, char *write_udp_buff, int write_udp_buff_len)
 {
-    char *ptr = kcps->write_udp_buff;
-    int len = kcps->write_udp_buff_len;
+    int len = write_udp_buff_len;
     if (global_main->lz4)
     {
-        kcps->write_udp_buff_lz4_len = LZ4_compress_default(kcps->write_udp_buff, kcps->write_udp_buff_lz4, kcps->write_udp_buff_len, RCV_BUFF_LEN);
-        if (kcps->write_udp_buff_lz4_len < 0)
+        char write_udp_buff_lz4[RCV_BUFF_LEN];
+        int write_udp_buff_lz4_len;
+        write_udp_buff_lz4_len = LZ4_compress_default(write_udp_buff, write_udp_buff_lz4, write_udp_buff_len, RCV_BUFF_LEN);
+        if (write_udp_buff_lz4_len < 0)
         {
             logging("warning", "encompress failed");
             return -1;
         }
-        ptr = kcps->write_udp_buff_lz4;
-        len = kcps->write_udp_buff_lz4_len;
-        logging("_encrypt_encompress", "encompress data: %d", len);
+        else
+        {
+            memcpy(write_udp_buff, write_udp_buff_lz4, write_udp_buff_lz4_len);
+            len = write_udp_buff_lz4_len;
+            logging("_encrypt_encompress", "encompress data: %d", len);
+        }
     }
     if (global_crypt->crypt)
     {
-        mcrypt_generic(kcps->en_mcrypt.td, ptr, len);
-        mcrypt_enc_set_state(kcps->en_mcrypt.td, kcps->en_mcrypt.enc_state, kcps->en_mcrypt.enc_state_size);
-        if (kcps->en_mcrypt.td == MCRYPT_FAILED)
+        mcrypt_generic(en_mcrypt.td, write_udp_buff, len);
+        mcrypt_enc_set_state(en_mcrypt.td, en_mcrypt.enc_state, en_mcrypt.enc_state_size);
+        if (en_mcrypt.td == MCRYPT_FAILED)
         {
             logging("warning", "encrypt failed");
             return -1;
         }
-        logging("_encrypt_encompress", "encrypt data: %d", len);
+        else
+        {
+            logging("_encrypt_encompress", "encrypt data: %d", len);
+        }
     }
-    memcpy(buff, &ptr, sizeof(char *));
-    memcpy(buff_len, &len, sizeof(int));
-    return 0;
+    return len;
 }
 
-int _decrypt_decompress(kcpsess_t *kcps, char **buff, int *buff_len)
+int _decrypt_decompress(kcpsess_t *kcps, mcrypt_t de_mcrypt, char *write_dev_buff, int write_dev_buff_len)
 {
-    char *ptr = kcps->write_dev_buff;
-    int len = kcps->write_dev_buff_len;
+    int len = write_dev_buff_len;
     if (global_crypt->crypt)
     {
-        mdecrypt_generic(kcps->de_mcrypt.td, kcps->write_dev_buff, kcps->write_dev_buff_len);
-        mcrypt_enc_set_state(kcps->de_mcrypt.td, kcps->de_mcrypt.enc_state, kcps->de_mcrypt.enc_state_size);
-        if (kcps->de_mcrypt.td == MCRYPT_FAILED)
+        mdecrypt_generic(de_mcrypt.td, write_dev_buff, write_dev_buff_len);
+        mcrypt_enc_set_state(de_mcrypt.td, de_mcrypt.enc_state, de_mcrypt.enc_state_size);
+        if (de_mcrypt.td == MCRYPT_FAILED)
         {
             logging("warning", "decrypt failed");
             return -1;
@@ -508,21 +511,21 @@ int _decrypt_decompress(kcpsess_t *kcps, char **buff, int *buff_len)
     }
     if (global_main->lz4)
     {
-        kcps->write_dev_buff_lz4_len = LZ4_decompress_safe(kcps->write_dev_buff, kcps->write_dev_buff_lz4, kcps->write_dev_buff_len, RCV_BUFF_LEN);
-        if (kcps->write_dev_buff_lz4_len < 0)
+        char write_dev_buff_lz4[RCV_BUFF_LEN];
+        int write_dev_buff_lz4_len;
+        write_dev_buff_lz4_len = LZ4_decompress_safe(write_dev_buff, write_dev_buff_lz4, write_dev_buff_len, RCV_BUFF_LEN);
+        if (write_dev_buff_lz4_len < 0)
         {
             logging("warning", "decompress failed");
             return -1;
         }
         else
         {
-            ptr = kcps->write_dev_buff_lz4;
-            len = kcps->write_dev_buff_lz4_len;
+            memcpy(write_dev_buff, write_dev_buff_lz4, sizeof(char *));
+            len = write_dev_buff_lz4_len;
         }
     }
-    memcpy(buff, &ptr, sizeof(char *));
-    memcpy(buff_len, &len, sizeof(int));
-    return 0;
+    return len;
 }
 
 //	|<------------ 4 bytes ------------>|
@@ -692,6 +695,31 @@ void *readudp_server(void *data)
     }
 }
 
+int _is_m_frame(frame_t *frame)
+{
+    struct ether_header *eth_header;
+    eth_header = (struct ether_header *)frame->buff;
+    uint16_t ether_type = ntohs(eth_header->ether_type);
+    //printf("ehter_type: %#x\n", ether_type);
+    if (ether_type == ETHERTYPE_IP)
+    {
+        struct ip *ip_packet = (struct ip *)(frame->buff + 14);
+        //printf("len %d proto: %#x\n", ntohs(ip_packet->ip_len), ip_packet->ip_p);
+        if (ip_packet->ip_p == 0x1)
+        {
+            //printf("icmp\n");
+            return 1;
+        }
+    }
+    else if (ether_type == ETHERTYPE_ARP)
+    {
+        //printf("arp\n");
+        return 1;
+    }
+
+    return 0;
+}
+
 void *readdev(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
@@ -702,7 +730,14 @@ void *readdev(void *data)
         if (frame->len > 0)
         {
             logging("readdev", "read tap: %d", frame->len);
-            rqueue_write(kcps->dev2kcp_queue, frame);
+            if (_is_m_frame(frame) == 1)
+            {
+                rqueue_write(kcps->dev2kcpm_queue, frame);
+            }
+            else
+            {
+                rqueue_write(kcps->dev2kcp_queue, frame);
+            }
             //pthread_kill(kcps->dev2kcpt, SIGRTMIN + 1);
         }
         else
@@ -720,7 +755,10 @@ void *kcp2dev(void *data)
     // {
     //     logging("warning", "error to pthread_sigmask writedev_sigset.");
     // }
+    mcrypt_t de_mcrypt;
+    _init_mcrypt(&de_mcrypt, kcps->key);
     int sleep_times;
+    char buff[RCV_BUFF_LEN];
     while (kcps->dead == 0)
     {
         // int sig;
@@ -732,9 +770,9 @@ void *kcp2dev(void *data)
         // logging("kcp2dev", "receive a writedev_sigset.");
         _check_kcp(kcps, true);
         pthread_mutex_lock(&kcps->ikcp_mutex);
-        kcps->write_dev_buff_len = ikcp_recv(kcps->kcp, kcps->write_dev_buff, RCV_BUFF_LEN);
+        int cnt = ikcp_recv(kcps->kcp, buff, RCV_BUFF_LEN);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
-        if (kcps->write_dev_buff_len <= 0)
+        if (cnt <= 0)
         {
             isleep(0.5);
             sleep_times++;
@@ -749,12 +787,11 @@ void *kcp2dev(void *data)
         {
             sleep_times = 0;
         }
-        logging("kcp2dev", "ikcp_recv: %d", kcps->write_dev_buff_len);
-        char *buff = kcps->write_dev_buff;
-        int len = kcps->write_dev_buff_len;
-        if (_decrypt_decompress(kcps, &buff, &len) == -1)
+        logging("kcp2dev", "ikcp_recv: %d", cnt);
+        cnt = _decrypt_decompress(kcps, de_mcrypt, buff, cnt);
+        if (cnt == -1)
         {
-            logging("warning", "faile to decrypt and decompress, r_addr: %s port: %d, len: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), len);
+            logging("warning", "faile to decrypt and decompress, r_addr: %s port: %d, len: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), cnt);
             continue;
         }
         if (global_main->recombine == true)
@@ -763,7 +800,7 @@ void *kcp2dev(void *data)
             memcpy(&total_frms, buff, 2);
             if (total_frms <= 0 || total_frms > 7)
             {
-                logging("warning", "alive frame or illegal data, total_frms: %d, r_addr: %s port: %d, len: %d", total_frms, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), len); //alive OR illegal
+                logging("warning", "alive frame or illegal data, total_frms: %d, r_addr: %s port: %d", total_frms, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port)); //alive OR illegal
                 continue;
             }
             uint16_t position = 16;
@@ -779,11 +816,81 @@ void *kcp2dev(void *data)
         }
         else
         {
-            int w = write(kcps->dev_fd, buff, len);
+            int w = write(kcps->dev_fd, buff, cnt);
             logging("kcp2dev", "wrote dev: %d", w);
         }
     }
     logging("notice", "writedev thread go to dead, conv: %d", kcps->conv);
+}
+
+/*
+0,1 int16 总帧数
+2,3 int16 帧1的长度
+4,5 int16 帧2的长度
+6,7 int16 帧3的长度
+8,9 int16 帧4的长度
+10,11 int16 帧5的长度
+12,13 int16 帧6的长度
+14,15 int16 帧7的长度
+*/
+void *dev2kcpm(void *data)
+{
+    kcpsess_t *kcps = (kcpsess_t *)data;
+    // if (pthread_sigmask(SIG_BLOCK, &kcps->dev2kcp_sigset, NULL) != 0)
+    // {
+    //     logging("warning", "error to pthread_sigmask dev2kcp_sigset.");
+    // }
+    char buff[RCV_BUFF_LEN];
+    mcrypt_t en_mcrypt;
+    _init_mcrypt(&en_mcrypt, kcps->key);
+    while (kcps->dead == 0)
+    {
+        // int sig;
+        // if (sigwait(&kcps->dev2kcp_sigset, &sig) == -1)
+        // {
+        //     logging("warning", "error sigwait.");
+        //     continue;
+        // }
+        // logging("dev2kcp", "receive a dev2kcp_sigset.");
+        while (rqueue_isempty(kcps->dev2kcpm_queue) == 0)
+        {
+            int cnt = 0;
+            if (global_main->recombine == true)
+            {
+                uint16_t total_frms = 0;
+                uint16_t position = 16;
+                cnt = 16;
+                frame_t *frame = (frame_t *)rqueue_read(kcps->dev2kcpm_queue);
+                total_frms++;
+                memcpy(buff + total_frms * 2, &frame->len, 2);    // frame length.
+                memcpy(buff + position, frame->buff, frame->len); // frame content.
+                position += frame->len;
+                cnt += frame->len;
+                free(frame);
+                memcpy(buff, &total_frms, 2);
+            }
+            else
+            {
+                frame_t *frame = (frame_t *)rqueue_read(kcps->dev2kcpm_queue);
+                memcpy(buff, frame->buff, frame->len);
+                cnt = frame->len;
+                free(frame);
+            }
+            cnt = _encrypt_encompress(kcps, en_mcrypt, buff, cnt);
+            if (cnt == -1)
+            {
+                logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
+                continue;
+            }
+            _check_kcp(kcps, true);
+            pthread_mutex_lock(&kcps->ikcp_mutex);
+            int y = ikcp_send(kcps->kcp, buff, cnt);
+            ikcp_flush(kcps->kcp);
+            pthread_mutex_unlock(&kcps->ikcp_mutex);
+            logging("dev2kcp", "ikcp_send: %d", cnt);
+        }
+        isleep(0.5);
+    }
 }
 
 /*
@@ -803,6 +910,9 @@ void *dev2kcp(void *data)
     // {
     //     logging("warning", "error to pthread_sigmask dev2kcp_sigset.");
     // }
+    char buff[RCV_BUFF_LEN];
+    mcrypt_t en_mcrypt;
+    _init_mcrypt(&en_mcrypt, kcps->key);
     while (kcps->dead == 0)
     {
         // int sig;
@@ -814,43 +924,44 @@ void *dev2kcp(void *data)
         // logging("dev2kcp", "receive a dev2kcp_sigset.");
         while (rqueue_isempty(kcps->dev2kcp_queue) == 0)
         {
+            int cnt = 0;
             if (global_main->recombine == true)
             {
                 uint16_t total_frms = 0;
                 uint16_t position = 16;
-                kcps->write_udp_buff_len = 16;
+                cnt = 16;
                 while (rqueue_isempty(kcps->dev2kcp_queue) == 0 && total_frms <= 5) // not empty and <= 5 frames.
                 {
                     frame_t *frame = (frame_t *)rqueue_read(kcps->dev2kcp_queue);
                     total_frms++;
-                    memcpy(kcps->write_udp_buff + total_frms * 2, &frame->len, 2);    // frame length.
-                    memcpy(kcps->write_udp_buff + position, frame->buff, frame->len); // frame content.
+                    memcpy(buff + total_frms * 2, &frame->len, 2);    // frame length.
+                    memcpy(buff + position, frame->buff, frame->len); // frame content.
                     position += frame->len;
-                    kcps->write_udp_buff_len += frame->len;
+                    cnt += frame->len;
                     free(frame);
                 }
-                memcpy(kcps->write_udp_buff, &total_frms, 2);
+                memcpy(buff, &total_frms, 2);
             }
             else
             {
                 frame_t *frame = (frame_t *)rqueue_read(kcps->dev2kcp_queue);
-                memcpy(kcps->write_udp_buff, frame->buff, frame->len);
-                kcps->write_udp_buff_len = frame->len;
+                memcpy(buff, frame->buff, frame->len);
+                cnt = frame->len;
                 free(frame);
             }
-            char *buff;
-            int len;
-            if (_encrypt_encompress(kcps, &buff, &len) == -1)
+
+            cnt = _encrypt_encompress(kcps, en_mcrypt, buff, cnt);
+            if (cnt == -1)
             {
-                logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), len);
+                logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
                 continue;
             }
             _check_kcp(kcps, true);
             pthread_mutex_lock(&kcps->ikcp_mutex);
-            int y = ikcp_send(kcps->kcp, buff, len);
+            int y = ikcp_send(kcps->kcp, buff, cnt);
             ikcp_flush(kcps->kcp);
             pthread_mutex_unlock(&kcps->ikcp_mutex);
-            logging("dev2kcp", "ikcp_send: %d", len);
+            logging("dev2kcp", "ikcp_send: %d", cnt);
         }
         isleep(0.5);
     }
@@ -885,7 +996,8 @@ void _kcpupdate(kcpsess_t *kcps)
     }
 }
 
-void kcpupdate_client(kcpsess_t *kcps) {
+void kcpupdate_client(kcpsess_t *kcps)
+{
     while (1)
     {
         _kcpupdate(kcps);

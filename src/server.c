@@ -151,10 +151,11 @@ void start_conv(action_t *action)
     {
         int dev_fd = init_tap(atoi(action->conv));
         kcpsess_t *kcps = init_kcpsess(atoi(action->conv), dev_fd, action->key, -1);    //SERVER DONT NEED sock_fd
-        sigaddset(&kcps->dev2kcp_sigset, SIGRTMIN + 1);
-        sigaddset(&kcps->kcp2dev_sigset, SIGRTMIN);
+        // sigaddset(&kcps->dev2kcp_sigset, SIGRTMIN + 1);
+        // sigaddset(&kcps->kcp2dev_sigset, SIGRTMIN);
         start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
         start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
+        start_thread(&kcps->dev2kcpmt, "dev2kcpmt", dev2kcpm, (void *)kcps);
         start_thread(&kcps->dev2kcpt, "dev2kcp", dev2kcp, (void *)kcps);
         ht_set(conv_session_map, action->conv, length(action->conv), kcps, sizeof(kcpsess_t));
         logging("notice", "server init_kcpsess conv: %s key: %s kcps: %p", action->conv, action->key, kcps);
@@ -176,6 +177,7 @@ void stop_conv(action_t *action)
         stop_thread(kcps->readdevt);
         stop_thread(kcps->kcp2devt);
         stop_thread(kcps->dev2kcpt);
+        stop_thread(kcps->dev2kcpmt);
         if (kcps->dev_fd > 0)
             close(kcps->dev_fd);
         if (kcps->kcp)

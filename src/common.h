@@ -16,6 +16,7 @@
 #include <mcrypt.h>
 #include <lz4.h>
 
+#include <arpa/inet.h>
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <sys/types.h>
@@ -23,9 +24,10 @@
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
+#include <net/ethernet.h>
+#include <netinet/ip.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
-#include <arpa/inet.h>
 
 #include "lib/ikcp.h"
 #include "lib/rqueue.h"
@@ -97,28 +99,12 @@ struct _kcpsess_st
     pthread_t kcp2devt;
     pthread_t readdevt;
     pthread_t dev2kcpt;
+    pthread_t dev2kcpmt;
+
     pthread_mutex_t ikcp_mutex;
 
-    sigset_t dev2kcp_sigset;
-    sigset_t kcp2dev_sigset;
-
-    uint64_t last_alive_time;
-    uint32_t latest_send_iclock;
-
-    mcrypt_t de_mcrypt;
-    mcrypt_t en_mcrypt;
-
-    char write_dev_buff[RCV_BUFF_LEN];
-    int write_dev_buff_len; 
-    char write_dev_buff_lz4[RCV_BUFF_LEN];
-    int write_dev_buff_lz4_len; 
-
-    char write_udp_buff[RCV_BUFF_LEN];
-    int write_udp_buff_len; 
-    char write_udp_buff_lz4[RCV_BUFF_LEN];
-    int write_udp_buff_lz4_len; 
-
     rqueue_t *dev2kcp_queue;
+    rqueue_t *dev2kcpm_queue;
 };
 typedef struct _kcpsess_st kcpsess_t;
 
@@ -169,6 +155,8 @@ void *kcp2dev(void *data);
 void *readdev(void *data);
 
 void *dev2kcp(void *data);
+
+void *dev2kcpm(void *data);
 
 void kcpupdate_client(kcpsess_t *kcps);
 
