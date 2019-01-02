@@ -155,7 +155,7 @@ void start_conv(action_t *action)
         // sigaddset(&kcps->kcp2dev_sigset, SIGRTMIN);
         start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
         start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
-        start_thread(&kcps->dev2kcpmt, "dev2kcpmt", dev2kcpm, (void *)kcps);
+        start_thread(&kcps->dev2kcpmt, "dev2kcpm", dev2kcpm, (void *)kcps);
         start_thread(&kcps->dev2kcpt, "dev2kcp", dev2kcp, (void *)kcps);
         ht_set(conv_session_map, action->conv, length(action->conv), kcps, sizeof(kcpsess_t));
         logging("notice", "server init_kcpsess conv: %s key: %s kcps: %p", action->conv, action->key, kcps);

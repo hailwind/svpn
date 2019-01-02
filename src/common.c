@@ -190,8 +190,6 @@ void init_ulimit()
     }
 }
 
-
-
 void print_params()
 {
     printf("===================parameters>>>>>>>>>>>>>>>>>>>\n");
@@ -208,42 +206,40 @@ void print_params()
     printf("<<<<<<<<<<<<<<<<<<<parameters===================\n");
 }
 
+int _set_cpu_affinity(pthread_t tid, char *name)
+{
+    return -1; //not apply.
+    if (global_main->role==SERVER) {
+        return -1;
+    }else{
+        int cpus = get_nprocs();
+        if (cpus==1) {
+            return -1;
+        }
+        cpu_set_t mask;
+        if (cpus==2) {
+            CPU_ZERO(&mask);
+            if (strncmp("kcp2dev", name, 7)==0) {
+                CPU_SET(0, &mask);
+            }else if (strncmp("dev2kcp", name, 7)==0) {
+                CPU_SET(0, &mask);
+            }else if (strncmp("dev2kcpm", name, 8)==0) {
+                CPU_SET(1, &mask);
+            }
+            pthread_setaffinity_np(tid, sizeof(mask), &mask);
+        }
+    }
+}
+
 void start_thread(pthread_t *tid, char *name, void *func, void *param)
 {
     if (pthread_create(tid, NULL, func, param) == 0)
     {
         pthread_t x = *tid;
         _reg_thread(x, name);
-        // cpu_set_t mask;
-        // CPU_ZERO(&mask);
-        // if (global_main->role==SERVER) {
-        //     if (strncmp("readdev", name, 7)==0) {
-        //         CPU_SET(0, &mask);
-        //     }else if (strncmp("kcp2dev", name, 7)==0) {
-        //         CPU_SET(1, &mask);
-        //     }else if (strncmp("dev2kcp", name, 7)==0) {
-        //         CPU_SET(2, &mask);
-        //     }else if (strncmp("readudp", name, 7)==0) {
-        //         CPU_SET(4, &mask);
-        //     }else if (strncmp("writeudp", name, 8)==0) {
-        //         CPU_SET(3, &mask);
-        //     }
-        // }else{
-        //     if (strncmp("readdev", name, 7)==0) {
-        //         CPU_SET(5, &mask);
-        //     }else if (strncmp("kcp2dev", name, 7)==0) {
-        //         CPU_SET(6, &mask);
-        //     }else if (strncmp("dev2kcp", name, 7)==0) {
-        //         CPU_SET(7, &mask);
-        //     }else if (strncmp("readudp", name, 7)==0) {
-        //         CPU_SET(8, &mask);
-        //     }else if (strncmp("default", name, 7)==0) {
-        //         CPU_SET(9, &mask);
-        //     }
-        // }
-        // pthread_setaffinity_np(x, sizeof(mask), &mask);
         pthread_detach(x);
-        logging("notice", "create %s thread: %ld", name, tid);
+        int cpu = _set_cpu_affinity(x, name);
+        logging("notice", "create %s thread: %ld, cpu affinity: %d", name, tid, cpu);
     }
 }
 
@@ -711,6 +707,8 @@ void *readudp_server(void *data)
     }
 }
 
+
+
 int _is_m_frame(frame_t *frame)
 {
     struct ether_header *eth_header;
@@ -906,6 +904,7 @@ void *dev2kcpm(void *data)
             pthread_mutex_unlock(&kcps->ikcp_mutex);
             logging("dev2kcp", "ikcp_send: %d", cnt);
         }
+        //isleep(1);
     }
 }
 

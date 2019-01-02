@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
+#include <sys/sysinfo.h>
 #include <net/ethernet.h>
 #include <netinet/ip.h>
 #include <linux/if.h>
