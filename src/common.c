@@ -459,7 +459,7 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd)
     return ps;
 }
 
-int _encrypt_encompress(kcpsess_t *kcps, mcrypt_t en_mcrypt, char *write_udp_buff, int write_udp_buff_len)
+int _encrypt_encompress(kcpsess_t *kcps, mcrypt_t *en_mcrypt, char *write_udp_buff, int write_udp_buff_len)
 {
     int len = write_udp_buff_len;
     if (global_main->lz4)
@@ -481,29 +481,25 @@ int _encrypt_encompress(kcpsess_t *kcps, mcrypt_t en_mcrypt, char *write_udp_buf
     }
     if (global_crypt->crypt)
     {
-        mcrypt_generic(en_mcrypt.td, write_udp_buff, len);
-        mcrypt_enc_set_state(en_mcrypt.td, en_mcrypt.enc_state, en_mcrypt.enc_state_size);
-        if (en_mcrypt.td == MCRYPT_FAILED)
+        mcrypt_generic(en_mcrypt->td, write_udp_buff, len);
+        mcrypt_enc_set_state(en_mcrypt->td, en_mcrypt->enc_state, en_mcrypt->enc_state_size);
+        if (en_mcrypt->td == MCRYPT_FAILED)
         {
             logging("warning", "encrypt failed");
             return -1;
-        }
-        else
-        {
-            logging("_encrypt_encompress", "encrypt data: %d", len);
         }
     }
     return len;
 }
 
-int _decrypt_decompress(kcpsess_t *kcps, mcrypt_t de_mcrypt, char *write_dev_buff, int write_dev_buff_len)
+int _decrypt_decompress(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *write_dev_buff, int write_dev_buff_len)
 {
     int len = write_dev_buff_len;
     if (global_crypt->crypt)
     {
-        mdecrypt_generic(de_mcrypt.td, write_dev_buff, write_dev_buff_len);
-        mcrypt_enc_set_state(de_mcrypt.td, de_mcrypt.enc_state, de_mcrypt.enc_state_size);
-        if (de_mcrypt.td == MCRYPT_FAILED)
+        mdecrypt_generic(de_mcrypt->td, write_dev_buff, write_dev_buff_len);
+        mcrypt_enc_set_state(de_mcrypt->td, de_mcrypt->enc_state, de_mcrypt->enc_state_size);
+        if (de_mcrypt->td == MCRYPT_FAILED)
         {
             logging("warning", "decrypt failed");
             return -1;
@@ -521,7 +517,7 @@ int _decrypt_decompress(kcpsess_t *kcps, mcrypt_t de_mcrypt, char *write_dev_buf
         }
         else
         {
-            memcpy(write_dev_buff, write_dev_buff_lz4, sizeof(char *));
+            memcpy(write_dev_buff, write_dev_buff_lz4, write_dev_buff_lz4_len);
             len = write_dev_buff_lz4_len;
         }
     }
@@ -774,7 +770,7 @@ void *kcp2dev(void *data)
         pthread_mutex_unlock(&kcps->ikcp_mutex);
         if (cnt <= 0)
         {
-            isleep(0.5);
+            isleep(2);
             sleep_times++;
             if (sleep_times >= 4000)
             {
@@ -788,7 +784,7 @@ void *kcp2dev(void *data)
             sleep_times = 0;
         }
         logging("kcp2dev", "ikcp_recv: %d", cnt);
-        cnt = _decrypt_decompress(kcps, de_mcrypt, buff, cnt);
+        cnt = _decrypt_decompress(kcps, &de_mcrypt, buff, cnt);
         if (cnt == -1)
         {
             logging("warning", "faile to decrypt and decompress, r_addr: %s port: %d, len: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), cnt);
@@ -876,7 +872,7 @@ void *dev2kcpm(void *data)
                 cnt = frame->len;
                 free(frame);
             }
-            cnt = _encrypt_encompress(kcps, en_mcrypt, buff, cnt);
+            cnt = _encrypt_encompress(kcps, &en_mcrypt, buff, cnt);
             if (cnt == -1)
             {
                 logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
@@ -889,7 +885,7 @@ void *dev2kcpm(void *data)
             pthread_mutex_unlock(&kcps->ikcp_mutex);
             logging("dev2kcp", "ikcp_send: %d", cnt);
         }
-        isleep(0.5);
+        isleep(1);
     }
 }
 
@@ -950,7 +946,7 @@ void *dev2kcp(void *data)
                 free(frame);
             }
 
-            cnt = _encrypt_encompress(kcps, en_mcrypt, buff, cnt);
+            cnt = _encrypt_encompress(kcps, &en_mcrypt, buff, cnt);
             if (cnt == -1)
             {
                 logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
@@ -963,7 +959,7 @@ void *dev2kcp(void *data)
             pthread_mutex_unlock(&kcps->ikcp_mutex);
             logging("dev2kcp", "ikcp_send: %d", cnt);
         }
-        isleep(0.5);
+        isleep(2);
     }
 }
 
