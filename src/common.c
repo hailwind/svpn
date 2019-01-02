@@ -6,6 +6,7 @@
 #define _COMMON_ 1
 #define TABLE_SIZE 64
 #define KV_LEN 64
+#define M_LABEL 0x90ABCDEF
 #endif
 
 static hashtable_t *thread_table;
@@ -193,14 +194,14 @@ void init_ulimit()
 void print_params()
 {
     printf("===================parameters>>>>>>>>>>>>>>>>>>>\n");
-    printf("Role              : %s\n", global_main->role==SERVER?"Server":"Client");
+    printf("Role              : %s\n", global_main->role == SERVER ? "Server" : "Client");
     printf("KCP Mode          : %d\n", global_main->mode);
     printf("KCP Minrto        : %d\n", global_main->minrto);
-    printf("LZ4               : %s\n", global_main->lz4==1?"true":"false");
-    printf("Recombine         : %s\n", global_main->recombine==1?"true":"false");
+    printf("LZ4               : %s\n", global_main->lz4 == 1 ? "true" : "false");
+    printf("Recombine         : %s\n", global_main->recombine == 1 ? "true" : "false");
     printf("Address           : %s\n", global_main->address);
     printf("Port              : %d\n", global_main->port);
-    printf("Crypt             : %s\n", global_crypt->crypt==1?"true":"false");
+    printf("Crypt             : %s\n", global_crypt->crypt == 1 ? "true" : "false");
     printf("Crypt Algo        : %s\n", global_crypt->crypt_algo);
     printf("Crypt Mode        : %s\n", global_crypt->crypt_mode);
     printf("<<<<<<<<<<<<<<<<<<<parameters===================\n");
@@ -209,21 +210,31 @@ void print_params()
 int _set_cpu_affinity(pthread_t tid, char *name)
 {
     return -1; //not apply.
-    if (global_main->role==SERVER) {
+    if (global_main->role == SERVER)
+    {
         return -1;
-    }else{
+    }
+    else
+    {
         int cpus = get_nprocs();
-        if (cpus==1) {
+        if (cpus == 1)
+        {
             return -1;
         }
         cpu_set_t mask;
-        if (cpus==2) {
+        if (cpus == 2)
+        {
             CPU_ZERO(&mask);
-            if (strncmp("kcp2dev", name, 7)==0) {
+            if (strncmp("kcp2dev", name, 7) == 0)
+            {
                 CPU_SET(0, &mask);
-            }else if (strncmp("dev2kcp", name, 7)==0) {
+            }
+            else if (strncmp("dev2kcp", name, 7) == 0)
+            {
                 CPU_SET(0, &mask);
-            }else if (strncmp("dev2kcpm", name, 8)==0) {
+            }
+            else if (strncmp("dev2kcpm", name, 8) == 0)
+            {
                 CPU_SET(1, &mask);
             }
             pthread_setaffinity_np(tid, sizeof(mask), &mask);
@@ -471,6 +482,8 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd)
 
     ps->dev2kcp_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
     ps->dev2kcpm_queue = rqueue_create(1024, RQUEUE_MODE_BLOCKING);
+
+    ps->kcp2devd_queue = rqueue_create(1024, RQUEUE_MODE_BLOCKING);
     logging("init_kcpsess", "kcps: %p", ps);
     return ps;
 }
@@ -661,9 +674,6 @@ void *readudp_client(void *data)
         pthread_mutex_lock(&kcps->ikcp_mutex);
         int ret = ikcp_input(kcps->kcp, buff, cnt);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
-
-        // pthread_kill(kcps->kcp2devt, SIGRTMIN);
-        // logging("readudp_client", "send a SIGRTMIN to %s, result: %d , kcp->state: %d", _thread_name(kcps->kcp2devt), ret, kcps->kcp->state);
     }
 }
 
@@ -680,7 +690,6 @@ void *readudp_server(void *data)
         {
             continue;
         }
-
         char conv_str[8];
         bzero(conv_str, 8);
         sprintf(conv_str, "%d", get_conv(buff));
@@ -695,19 +704,15 @@ void *readudp_server(void *data)
             void *node = ht_get(server_listen->conn_map, conv_str, length(conv_str), &node_len);
             kcpsess_t *kcps = (kcpsess_t *)node;
             logging("readudp_server", "state: %d, cmd %c, conv: %d, sn: %d, una: %d, rcv_nxt %d, snd_nxt %d, length: %d", kcps->kcp->state, get_cmd(buff), get_conv(buff), get_sn(buff), get_una(buff), kcps->kcp->rcv_nxt, kcps->kcp->snd_nxt, cnt);
-            _check_kcp_server(kcps, server_listen->sock_fd, &client, client_len);
             logging("readudp_server", "recv udp packet: %d addr: %s port: %d", cnt, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
+            _check_kcp_server(kcps, server_listen->sock_fd, &client, client_len);
+
             pthread_mutex_lock(&kcps->ikcp_mutex);
             int ret = ikcp_input(kcps->kcp, buff, cnt);
             pthread_mutex_unlock(&kcps->ikcp_mutex);
-
-            // pthread_kill(kcps->kcp2devt, SIGRTMIN);
-            // logging("readudp_server", "send a SIGRTMIN to %s, result: %d , kcp->state: %d", _thread_name(kcps->kcp2devt), ret, kcps->kcp->state);
         }
     }
 }
-
-
 
 int _is_m_frame(frame_t *frame)
 {
@@ -730,7 +735,6 @@ int _is_m_frame(frame_t *frame)
         //printf("arp\n");
         return 1;
     }
-
     return 0;
 }
 
@@ -760,6 +764,48 @@ void *readdev(void *data)
             free(frame);
         }
     }
+}
+
+void de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
+{
+    logging("kcp2dev", "ikcp_recv: %d", len);
+    int cnt = _decrypt_decompress(kcps, de_mcrypt, buff, len);
+    if (cnt == -1)
+    {
+        logging("warning", "faile to decrypt and decompress, r_addr: %s port: %d, len: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), cnt);
+        return;
+    }
+    if (global_main->recombine == true)
+    {
+        uint16_t total_frms = 0;
+        memcpy(&total_frms, buff, 2);
+        if (total_frms <= 0 || total_frms > 7)
+        {
+            logging("warning", "alive frame or illegal data, total_frms: %d, r_addr: %s port: %d", total_frms, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port)); //alive OR illegal
+            return;
+        }
+        uint16_t position = 16;
+        uint16_t i = 0;
+        for (i = 0; i < total_frms; i++)
+        {
+            uint16_t frm_size;
+            memcpy(&frm_size, buff + (i + 1) * 2, 2);
+            int y = write(kcps->dev_fd, buff + position, frm_size);
+            logging("kcp2dev", "write to dev: idx: %d, position: %d, size: %d, wrote: %d", i, position, frm_size, y);
+            position += frm_size;
+        }
+    }
+    else
+    {
+        int w = write(kcps->dev_fd, buff, cnt);
+        logging("kcp2dev", "wrote dev: %d", w);
+    }
+}
+
+int _is_m_packet(char *buff, int len)
+{
+    uint32_t label = M_LABEL;
+    return memcmp(&label, buff+len-4, 4);
 }
 
 void *kcp2dev(void *data)
@@ -800,41 +846,39 @@ void *kcp2dev(void *data)
         else
         {
             sleep_times = 0;
-        }
-        logging("kcp2dev", "ikcp_recv: %d", cnt);
-        cnt = _decrypt_decompress(kcps, &de_mcrypt, buff, cnt);
-        if (cnt == -1)
-        {
-            logging("warning", "faile to decrypt and decompress, r_addr: %s port: %d, len: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), cnt);
-            continue;
-        }
-        if (global_main->recombine == true)
-        {
-            uint16_t total_frms = 0;
-            memcpy(&total_frms, buff, 2);
-            if (total_frms <= 0 || total_frms > 7)
+            if (_is_m_packet(buff, cnt)==0)
             {
-                logging("warning", "alive frame or illegal data, total_frms: %d, r_addr: %s port: %d", total_frms, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port)); //alive OR illegal
-                continue;
+                de_write_dev(kcps, &de_mcrypt, buff, cnt-4);
             }
-            uint16_t position = 16;
-            uint16_t i = 0;
-            for (i = 0; i < total_frms; i++)
+            else
             {
-                uint16_t frm_size;
-                memcpy(&frm_size, buff + (i + 1) * 2, 2);
-                int y = write(kcps->dev_fd, buff + position, frm_size);
-                logging("kcp2dev", "write to dev: idx: %d, position: %d, size: %d, wrote: %d", i, position, frm_size, y);
-                position += frm_size;
+                frame_t *packet = malloc(sizeof(frame_t));
+                memcpy(packet->buff, buff, cnt);
+                packet->len = cnt;
+                rqueue_write(kcps->kcp2devd_queue, packet);
             }
-        }
-        else
-        {
-            int w = write(kcps->dev_fd, buff, cnt);
-            logging("kcp2dev", "wrote dev: %d", w);
         }
     }
     logging("notice", "writedev thread go to dead, conv: %d", kcps->conv);
+}
+
+void *kcp2devd(void *data)
+{
+    kcpsess_t *kcps = (kcpsess_t *)data;
+    mcrypt_t de_mcrypt;
+    _init_mcrypt(&de_mcrypt, kcps->key);
+    while (kcps->dead == 0)
+    {
+        while (rqueue_isempty(kcps->kcp2devd_queue) == 0)
+        {
+            frame_t *packet = (frame_t *)rqueue_read(kcps->kcp2devd_queue);
+            char *buff = packet->buff;
+            int cnt = packet->len;
+            de_write_dev(kcps, &de_mcrypt, buff, cnt);
+            free(packet);
+        }
+        isleep(5);
+    }
 }
 
 /*
@@ -898,13 +942,14 @@ void *dev2kcpm(void *data)
                 continue;
             }
             _check_kcp(kcps, true);
+            uint32_t label = M_LABEL;
+            memcpy(buff+cnt, &label, 4);
             pthread_mutex_lock(&kcps->ikcp_mutex);
-            int y = ikcp_send(kcps->kcp, buff, cnt);
+            int y = ikcp_send(kcps->kcp, buff, cnt+4);
             ikcp_flush(kcps->kcp);
             pthread_mutex_unlock(&kcps->ikcp_mutex);
             logging("dev2kcp", "ikcp_send: %d", cnt);
         }
-        //isleep(1);
     }
 }
 

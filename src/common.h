@@ -97,14 +97,18 @@ struct _kcpsess_st
     struct sockaddr_in dst;
     socklen_t dst_len;
 
-    pthread_t kcp2devt;
+    pthread_mutex_t ikcp_mutex;
+
     pthread_t readdevt;
+    pthread_t readkcpt;
+
+    pthread_t kcp2devt;
+    pthread_t kcp2devdt;
+    rqueue_t *kcp2devd_queue;
+
     pthread_t dev2kcpt;
     pthread_t dev2kcpmt;
     sigset_t dev2kcpm_sigset;
-
-    pthread_mutex_t ikcp_mutex;
-
     rqueue_t *dev2kcp_queue;
     rqueue_t *dev2kcpm_queue;
 };
@@ -154,7 +158,11 @@ void *readudp_client(void *data);
 
 void *readudp_server(void *data);
 
+void *readkcp(void *data);
+
 void *kcp2dev(void *data);
+
+void *kcp2devd(void *data);
 
 void *readdev(void *data);
 
