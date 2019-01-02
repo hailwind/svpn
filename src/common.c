@@ -790,7 +790,7 @@ void *kcp2dev(void *data)
         pthread_mutex_unlock(&kcps->ikcp_mutex);
         if (cnt <= 0)
         {
-            isleep(2);
+            isleep(1);
             sleep_times++;
             if (sleep_times >= 4000)
             {
@@ -848,6 +848,7 @@ void *kcp2dev(void *data)
 10,11 int16 帧5的长度
 12,13 int16 帧6的长度
 14,15 int16 帧7的长度
+此方法单独起一线程，并且是用信号通信的，专门发送icmp和arp，以提升高负载状况下的ICMP延时性能
 */
 void *dev2kcpm(void *data)
 {
@@ -975,7 +976,7 @@ void *dev2kcp(void *data)
             pthread_mutex_unlock(&kcps->ikcp_mutex);
             logging("dev2kcp", "ikcp_send: %d", cnt);
         }
-        isleep(2);
+        isleep(1);
     }
 }
 
