@@ -16,15 +16,14 @@ void start_conv(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
     kcpsess_t *kcps = init_kcpsess(conv, dev_fd, key, sock_fd);
     kcps->dst = *dst;
     kcps->dst_len = sizeof(struct sockaddr_in);
-    sigaddset(&kcps->dev2kcpm_sigset, SIGRTMIN + 1);
-    // sigaddset(&kcps->kcp2devm_sigset, SIGRTMIN);
+    //sigaddset(&kcps->dev2kcpm_sigset, SIGRTMIN + 1);
+    //sigaddset(&kcps->kcp2devm_sigset, SIGRTMIN);
     pthread_t readudpt;
     start_thread(&readudpt, "readudp", readudp_client, (void *)kcps);
     start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
     start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
     start_thread(&kcps->kcp2devdt, "kcp2devd", kcp2devd, (void *)kcps);
     start_thread(&kcps->dev2kcpt, "dev2kcp", dev2kcp, (void *)kcps);
-    start_thread(&kcps->dev2kcpmt, "dev2kcpm", dev2kcpm, (void *)kcps);
     kcpupdate_client(kcps);
 }
 

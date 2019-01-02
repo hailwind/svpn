@@ -104,13 +104,10 @@ struct _kcpsess_st
 
     pthread_t kcp2devt;
     pthread_t kcp2devdt;
-    rqueue_t *kcp2devd_queue;
+    rqueue_t *kcp2dev_queue;
 
     pthread_t dev2kcpt;
-    pthread_t dev2kcpmt;
-    sigset_t dev2kcpm_sigset;
     rqueue_t *dev2kcp_queue;
-    rqueue_t *dev2kcpm_queue;
 };
 typedef struct _kcpsess_st kcpsess_t;
 
@@ -168,7 +165,7 @@ void *readdev(void *data);
 
 void *dev2kcp(void *data);
 
-void *dev2kcpm(void *data);
+//void *dev2kcpm(void *data);
 
 void kcpupdate_client(kcpsess_t *kcps);
 

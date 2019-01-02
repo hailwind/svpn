@@ -481,9 +481,7 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd)
     ps->ikcp_mutex = ikcp_mutex;
 
     ps->dev2kcp_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
-    ps->dev2kcpm_queue = rqueue_create(1024, RQUEUE_MODE_BLOCKING);
-
-    ps->kcp2devd_queue = rqueue_create(1024, RQUEUE_MODE_BLOCKING);
+    ps->kcp2dev_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
     logging("init_kcpsess", "kcps: %p", ps);
     return ps;
 }
@@ -714,15 +712,15 @@ void *readudp_server(void *data)
     }
 }
 
-int _is_m_frame(frame_t *frame)
+int _is_m_frame(char *buff)
 {
     struct ether_header *eth_header;
-    eth_header = (struct ether_header *)frame->buff;
+    eth_header = (struct ether_header *)buff;
     uint16_t ether_type = ntohs(eth_header->ether_type);
     //printf("ehter_type: %#x\n", ether_type);
     if (ether_type == ETHERTYPE_IP)
     {
-        struct ip *ip_packet = (struct ip *)(frame->buff + 14);
+        struct ip *ip_packet = (struct ip *)(buff + 14);
         //printf("len %d proto: %#x\n", ntohs(ip_packet->ip_len), ip_packet->ip_p);
         if (ip_packet->ip_p == 0x1)
         {
@@ -738,9 +736,59 @@ int _is_m_frame(frame_t *frame)
     return 0;
 }
 
+/*
+0,1 int16 总帧数
+2,3 int16 帧1的长度
+4,5 int16 帧2的长度
+6,7 int16 帧3的长度
+8,9 int16 帧4的长度
+10,11 int16 帧5的长度
+12,13 int16 帧6的长度
+14,15 int16 帧7的长度
+*/
+void *_en_write_udp(kcpsess_t *kcps, mcrypt_t *en_mcrypt, frame_t *frame)
+{
+    char buff[RCV_BUFF_LEN];
+    int cnt = 0;
+    if (global_main->recombine == true)
+    {
+        uint16_t total_frms = 0;
+        uint16_t position = 16;
+        cnt = 16;
+        total_frms++;
+        memcpy(buff + total_frms * 2, &frame->len, 2);    // frame length.
+        memcpy(buff + position, frame->buff, frame->len); // frame content.
+        position += frame->len;
+        cnt += frame->len;
+        free(frame);
+        memcpy(buff, &total_frms, 2);
+    }
+    else
+    {
+        memcpy(buff, frame->buff, frame->len);
+        cnt = frame->len;
+        free(frame);
+    }
+    cnt = _encrypt_encompress(kcps, en_mcrypt, buff, cnt);
+    if (cnt == -1)
+    {
+        logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
+    }
+    _check_kcp(kcps, true);
+    uint32_t label = M_LABEL;
+    memcpy(buff + cnt, &label, 4);
+    pthread_mutex_lock(&kcps->ikcp_mutex);
+    int y = ikcp_send(kcps->kcp, buff, cnt + 4);
+    ikcp_flush(kcps->kcp);
+    pthread_mutex_unlock(&kcps->ikcp_mutex);
+    logging("dev2kcp", "ikcp_send: %d", cnt);
+}
+
 void *readdev(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
+    mcrypt_t en_mcrypt;
+    _init_mcrypt(&en_mcrypt, kcps->key);
     while (kcps->dead == 0)
     {
         frame_t *frame = malloc(sizeof(frame_t));
@@ -748,10 +796,9 @@ void *readdev(void *data)
         if (frame->len > 0)
         {
             logging("readdev", "read tap: %d", frame->len);
-            if (_is_m_frame(frame) == 1)
+            if (_is_m_frame(frame->buff) == 1)
             {
-                rqueue_write(kcps->dev2kcpm_queue, frame);
-                pthread_kill(kcps->dev2kcpmt, SIGRTMIN + 1);
+                _en_write_udp(kcps, &en_mcrypt, frame);
             }
             else
             {
@@ -761,7 +808,6 @@ void *readdev(void *data)
         else
         {
             logging("notice", "read from tap dev faile: %d", frame->len);
-            free(frame);
         }
     }
 }
@@ -805,7 +851,7 @@ void de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
 int _is_m_packet(char *buff, int len)
 {
     uint32_t label = M_LABEL;
-    return memcmp(&label, buff+len-4, 4);
+    return memcmp(&label, buff + len - 4, 4);
 }
 
 void *kcp2dev(void *data)
@@ -846,16 +892,16 @@ void *kcp2dev(void *data)
         else
         {
             sleep_times = 0;
-            if (_is_m_packet(buff, cnt)==0)
+            if (_is_m_packet(buff, cnt) == 0)
             {
-                de_write_dev(kcps, &de_mcrypt, buff, cnt-4);
+                de_write_dev(kcps, &de_mcrypt, buff, cnt - 4);
             }
             else
             {
                 frame_t *packet = malloc(sizeof(frame_t));
                 memcpy(packet->buff, buff, cnt);
                 packet->len = cnt;
-                rqueue_write(kcps->kcp2devd_queue, packet);
+                rqueue_write(kcps->kcp2dev_queue, packet);
             }
         }
     }
@@ -869,9 +915,9 @@ void *kcp2devd(void *data)
     _init_mcrypt(&de_mcrypt, kcps->key);
     while (kcps->dead == 0)
     {
-        while (rqueue_isempty(kcps->kcp2devd_queue) == 0)
+        while (rqueue_isempty(kcps->kcp2dev_queue) == 0)
         {
-            frame_t *packet = (frame_t *)rqueue_read(kcps->kcp2devd_queue);
+            frame_t *packet = (frame_t *)rqueue_read(kcps->kcp2dev_queue);
             char *buff = packet->buff;
             int cnt = packet->len;
             de_write_dev(kcps, &de_mcrypt, buff, cnt);
@@ -890,95 +936,15 @@ void *kcp2devd(void *data)
 10,11 int16 帧5的长度
 12,13 int16 帧6的长度
 14,15 int16 帧7的长度
-此方法单独起一线程，并且是用信号通信的，专门发送icmp和arp，以提升高负载状况下的ICMP延时性能
-*/
-void *dev2kcpm(void *data)
-{
-    kcpsess_t *kcps = (kcpsess_t *)data;
-    if (pthread_sigmask(SIG_BLOCK, &kcps->dev2kcpm_sigset, NULL) != 0)
-    {
-        logging("warning", "error to pthread_sigmask dev2kcp_sigset.");
-    }
-    char buff[RCV_BUFF_LEN];
-    mcrypt_t en_mcrypt;
-    _init_mcrypt(&en_mcrypt, kcps->key);
-    while (kcps->dead == 0)
-    {
-        int sig;
-        if (sigwait(&kcps->dev2kcpm_sigset, &sig) == -1)
-        {
-            logging("warning", "error sigwait.");
-            continue;
-        }
-        logging("dev2kcp", "receive a dev2kcp_sigset.");
-        while (rqueue_isempty(kcps->dev2kcpm_queue) == 0)
-        {
-            int cnt = 0;
-            if (global_main->recombine == true)
-            {
-                uint16_t total_frms = 0;
-                uint16_t position = 16;
-                cnt = 16;
-                frame_t *frame = (frame_t *)rqueue_read(kcps->dev2kcpm_queue);
-                total_frms++;
-                memcpy(buff + total_frms * 2, &frame->len, 2);    // frame length.
-                memcpy(buff + position, frame->buff, frame->len); // frame content.
-                position += frame->len;
-                cnt += frame->len;
-                free(frame);
-                memcpy(buff, &total_frms, 2);
-            }
-            else
-            {
-                frame_t *frame = (frame_t *)rqueue_read(kcps->dev2kcpm_queue);
-                memcpy(buff, frame->buff, frame->len);
-                cnt = frame->len;
-                free(frame);
-            }
-            cnt = _encrypt_encompress(kcps, &en_mcrypt, buff, cnt);
-            if (cnt == -1)
-            {
-                logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
-                continue;
-            }
-            _check_kcp(kcps, true);
-            uint32_t label = M_LABEL;
-            memcpy(buff+cnt, &label, 4);
-            pthread_mutex_lock(&kcps->ikcp_mutex);
-            int y = ikcp_send(kcps->kcp, buff, cnt+4);
-            ikcp_flush(kcps->kcp);
-            pthread_mutex_unlock(&kcps->ikcp_mutex);
-            logging("dev2kcp", "ikcp_send: %d", cnt);
-        }
-    }
-}
-
-/*
-0,1 int16 总帧数
-2,3 int16 帧1的长度
-4,5 int16 帧2的长度
-6,7 int16 帧3的长度
-8,9 int16 帧4的长度
-10,11 int16 帧5的长度
-12,13 int16 帧6的长度
-14,15 int16 帧7的长度
 */
 void *dev2kcp(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
-
     char buff[RCV_BUFF_LEN];
     mcrypt_t en_mcrypt;
     _init_mcrypt(&en_mcrypt, kcps->key);
     while (kcps->dead == 0)
     {
-        // int sig;
-        // if (sigwait(&kcps->dev2kcp_sigset, &sig) == -1)
-        // {
-        //     logging("warning", "error sigwait.");
-        //     continue;
-        // }
-        // logging("dev2kcp", "receive a dev2kcp_sigset.");
         while (rqueue_isempty(kcps->dev2kcp_queue) == 0)
         {
             int cnt = 0;
