@@ -1,7 +1,7 @@
 #include "common.h"
 
 void print_help() {
-    printf("client --server=192.168.1.1 [--port=8888] --conv=28445 [--with-lz4] [no-recombine] [--no-crypt] --crypt-key=0123456789012345678901234567890 [--crypt-algo=twofish] [--crypt-mode=cbc] [--mode=3] [--debug]\n");
+    printf("client --server=192.168.1.1 [--port=8888] --conv=28445 [--with-lz4] [--no-recombine] [--no-crypt] --crypt-key=0123456789012345678901234567890 [--crypt-algo=twofish] [--crypt-mode=cbc] [--mode=3] [--minrto=20] [--debug]\n");
     exit(0);
 }
 
@@ -16,7 +16,7 @@ void start_conv(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
     kcpsess_t *kcps = init_kcpsess(conv, dev_fd, key, sock_fd);
     kcps->dst = *dst;
     kcps->dst_len = sizeof(struct sockaddr_in);
-    // sigaddset(&kcps->dev2kcp_sigset, SIGRTMIN + 1);
+    sigaddset(&kcps->dev2kcpm_sigset, SIGRTMIN + 1);
     // sigaddset(&kcps->kcp2dev_sigset, SIGRTMIN);
     pthread_t readudpt;
     start_thread(&readudpt, "readudp", readudp_client, (void *)kcps);
@@ -28,19 +28,20 @@ void start_conv(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
 }
 
 static const struct option long_option[]={
-   {"server",required_argument,NULL,'s'},
-   {"port",required_argument,NULL,'p'},
-   {"conv",required_argument,NULL,'c'},
-   {"with-lz4",no_argument,NULL,'Z'},
-   {"no-crypt",no_argument,NULL,'C'},
-   {"no-recombine", no_argument, NULL, 'R'},
-   {"crypt-key",required_argument,NULL,'k'},
-   {"crypt-algo",required_argument,NULL,'A'},
-   {"crypt-mode",required_argument,NULL,'M'},
-   {"mode",required_argument,NULL,'m'}, 
-   {"debug",no_argument,NULL,'d'},
-   {"help",no_argument,NULL,'h'},
-   {NULL,0,NULL,0}
+    {"server",required_argument,NULL,'s'},
+    {"port",required_argument,NULL,'p'},
+    {"conv",required_argument,NULL,'c'},
+    {"with-lz4",no_argument,NULL,'Z'},
+    {"no-crypt",no_argument,NULL,'C'},
+    {"no-recombine", no_argument, NULL, 'R'},
+    {"crypt-key",required_argument,NULL,'k'},
+    {"crypt-algo",required_argument,NULL,'A'},
+    {"crypt-mode",required_argument,NULL,'M'},
+    {"mode",required_argument,NULL,'m'}, 
+    {"minrto", required_argument, NULL, 'r'},
+    {"debug",no_argument,NULL,'d'},
+    {"help",no_argument,NULL,'h'},
+    {NULL,0,NULL,0}
 };
 
 int main(int argc, char *argv[]) {
@@ -58,7 +59,8 @@ int main(int argc, char *argv[]) {
     char *server_addr=NULL;
     int server_port = DEFAULT_SERVER_PORT;
     int role=CLIENT; 
-    int mode=3; 
+    int mode=3;
+    int minrto=RX_MINRTO;
     int lz4=false; 
     int debug=false; 
     int recombine=true; //frame re recombine
@@ -95,6 +97,8 @@ int main(int argc, char *argv[]) {
                 crypt_mode = optarg; break;
             case 'm': 
                 mode = atoi(optarg); break;
+            case 'r':
+                minrto = atoi(optarg); break;
             case 'd': 
                 debug=true; break;
             case 'h': 
@@ -109,8 +113,9 @@ int main(int argc, char *argv[]) {
         logging("notice", "no key input or key too long, the length must be between 16 and 32");
         exit(1);
     }
-    init_global_config(role, mode, lz4, recombine, debug, crypt, crypt_algo, crypt_mode);
+    init_global_config(role, mode, minrto, lz4, recombine, debug, crypt, crypt_algo, crypt_mode);
     init_server_config(server_addr, server_port);
+    print_params();
 
     int dev_fd = init_tap(conv);
 

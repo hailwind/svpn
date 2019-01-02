@@ -16,7 +16,7 @@ void print_help()
 {
     printf("\
 //start a server process.\n\
-server --bind=192.168.1.2 [--port=8888] [--mode=3] [--with-lz4] [no-recombine] [--no-crypt]  [--crypt-algo=twofish] [--crypt-mode=cbc] [--debug]\n\
+server --bind=192.168.1.2 [--port=8888] [--mode=3] [--minrto=20] [--with-lz4] [--no-recombine] [--no-crypt]  [--crypt-algo=twofish] [--crypt-mode=cbc] [--debug]\n\
 //add a conv to a server, identify the server by ipaddr and port. \n\
 server --bind=192.168.1.2 [--port=8888] --add-conv=38837 --crypt-key=0123456789012345678901234567890\n\
 //del a conv from a server, identify the server by ipaddr and port. \n\
@@ -151,7 +151,7 @@ void start_conv(action_t *action)
     {
         int dev_fd = init_tap(atoi(action->conv));
         kcpsess_t *kcps = init_kcpsess(atoi(action->conv), dev_fd, action->key, -1);    //SERVER DONT NEED sock_fd
-        // sigaddset(&kcps->dev2kcp_sigset, SIGRTMIN + 1);
+        sigaddset(&kcps->dev2kcpm_sigset, SIGRTMIN + 1);
         // sigaddset(&kcps->kcp2dev_sigset, SIGRTMIN);
         start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
         start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
@@ -221,6 +221,7 @@ struct option long_option[] = {
     {"crypt-algo", required_argument, NULL, 'A'},
     {"crypt-mode", required_argument, NULL, 'M'},
     {"mode", required_argument, NULL, 'm'},
+    {"minrto", required_argument, NULL, 'r'},
     {"del", required_argument, NULL, 'X'},
     {"add", required_argument, NULL, 'Y'},
     {"del-conv", required_argument, NULL, 'X'},
@@ -245,6 +246,7 @@ int main(int argc, char *argv[])
     int server_port = DEFAULT_SERVER_PORT;
     int role=SERVER; 
     int mode=3;
+    int minrto=RX_MINRTO;
     int lz4=false; 
     int recombine=true; //frame re recombine
     int debug=false; 
@@ -281,6 +283,8 @@ int main(int argc, char *argv[])
             crypt_mode = optarg; break;
         case 'm':
             mode = atoi(optarg); break;
+        case 'r':
+            minrto = atoi(optarg); break;
         case 'X':
             cmd = "DEL"; conv = optarg; break;
         case 'Y':
@@ -296,7 +300,7 @@ int main(int argc, char *argv[])
         print_help();
         exit(1);
     }
-    init_global_config(role, mode, lz4, recombine, debug, crypt, crypt_algo, crypt_mode);
+    init_global_config(role, mode, minrto, lz4, recombine, debug, crypt, crypt_algo, crypt_mode);
     if (cmd && conv)
     {
         int fifo_fd = open_fifo(server_addr, server_port, 'W');
@@ -305,6 +309,7 @@ int main(int argc, char *argv[])
         exit(0);
     }
     init_server_config(server_addr, server_port);
+    print_params();
 
     conv_session_map = ht_create(MAX_CONVS, 0, NULL);
     char *mPtr = NULL;

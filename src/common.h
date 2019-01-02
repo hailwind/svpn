@@ -100,6 +100,7 @@ struct _kcpsess_st
     pthread_t readdevt;
     pthread_t dev2kcpt;
     pthread_t dev2kcpmt;
+    sigset_t dev2kcpm_sigset;
 
     pthread_mutex_t ikcp_mutex;
 
@@ -116,9 +117,11 @@ struct _server_listen_st
 };
 typedef struct _server_listen_st server_listen_t;
 
+void print_params();
+
 void init_ulimit();
 
-void init_global_config(int role, int mode, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode);
+void init_global_config(int role, int mode, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode);
 
 void init_server_config(char *server_addr, int server_port);
 

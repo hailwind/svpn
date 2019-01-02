@@ -23,6 +23,7 @@ struct main_st
     int mode;
     char address[128];
     int port;
+    int minrto;
 };
 typedef struct main_st main_t;
 static main_t *global_main;
@@ -138,7 +139,7 @@ void _erase_pid(char *role, char *ipaddr, int id)
     unlink(f_name);
 }
 
-void init_global_config(int role, int mode, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode)
+void init_global_config(int role, int mode, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode)
 {
     debug = debug_param;
 
@@ -147,6 +148,7 @@ void init_global_config(int role, int mode, int lz4, int recombine, int debug_pa
     global_main->recombine = recombine;
     global_main->role = role;
     global_main->mode = mode;
+    global_main->minrto = minrto;
 
     global_crypt = malloc(sizeof(crypt_t));
     global_crypt->crypt = crypt;
@@ -186,6 +188,24 @@ void init_ulimit()
     {
         logging("error", "Failed to set core rlimit.\n");
     }
+}
+
+
+
+void print_params()
+{
+    printf("===================parameters>>>>>>>>>>>>>>>>>>>\n");
+    printf("Role              : %s\n", global_main->role==SERVER?"Server":"Client");
+    printf("KCP Mode          : %d\n", global_main->mode);
+    printf("KCP Minrto        : %d\n", global_main->minrto);
+    printf("LZ4               : %s\n", global_main->lz4==1?"true":"false");
+    printf("Recombine         : %s\n", global_main->recombine==1?"true":"false");
+    printf("Address           : %s\n", global_main->address);
+    printf("Port              : %d\n", global_main->port);
+    printf("Crypt             : %s\n", global_crypt->crypt==1?"true":"false");
+    printf("Crypt Algo        : %s\n", global_crypt->crypt_algo);
+    printf("Crypt Mode        : %s\n", global_crypt->crypt_mode);
+    printf("<<<<<<<<<<<<<<<<<<<parameters===================\n");
 }
 
 void start_thread(pthread_t *tid, char *name, void *func, void *param)
@@ -400,7 +420,7 @@ void _init_kcp(kcpsess_t *ps)
     ikcp_wndsize(kcp_, SND_WINDOW, RSV_WINDOW);
     ikcp_setmtu(kcp_, MTU);
 
-    kcp_->rx_minrto = RX_MINRTO;
+    kcp_->rx_minrto = global_main->minrto;
     kcp_->output = udp_output;
     if (ps->kcp)
     {
@@ -729,12 +749,12 @@ void *readdev(void *data)
             if (_is_m_frame(frame) == 1)
             {
                 rqueue_write(kcps->dev2kcpm_queue, frame);
+                pthread_kill(kcps->dev2kcpmt, SIGRTMIN + 1);
             }
             else
             {
                 rqueue_write(kcps->dev2kcp_queue, frame);
             }
-            //pthread_kill(kcps->dev2kcpt, SIGRTMIN + 1);
         }
         else
         {
@@ -832,22 +852,22 @@ void *kcp2dev(void *data)
 void *dev2kcpm(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
-    // if (pthread_sigmask(SIG_BLOCK, &kcps->dev2kcp_sigset, NULL) != 0)
-    // {
-    //     logging("warning", "error to pthread_sigmask dev2kcp_sigset.");
-    // }
+    if (pthread_sigmask(SIG_BLOCK, &kcps->dev2kcpm_sigset, NULL) != 0)
+    {
+        logging("warning", "error to pthread_sigmask dev2kcp_sigset.");
+    }
     char buff[RCV_BUFF_LEN];
     mcrypt_t en_mcrypt;
     _init_mcrypt(&en_mcrypt, kcps->key);
     while (kcps->dead == 0)
     {
-        // int sig;
-        // if (sigwait(&kcps->dev2kcp_sigset, &sig) == -1)
-        // {
-        //     logging("warning", "error sigwait.");
-        //     continue;
-        // }
-        // logging("dev2kcp", "receive a dev2kcp_sigset.");
+        int sig;
+        if (sigwait(&kcps->dev2kcpm_sigset, &sig) == -1)
+        {
+            logging("warning", "error sigwait.");
+            continue;
+        }
+        logging("dev2kcp", "receive a dev2kcp_sigset.");
         while (rqueue_isempty(kcps->dev2kcpm_queue) == 0)
         {
             int cnt = 0;
@@ -885,7 +905,6 @@ void *dev2kcpm(void *data)
             pthread_mutex_unlock(&kcps->ikcp_mutex);
             logging("dev2kcp", "ikcp_send: %d", cnt);
         }
-        isleep(1);
     }
 }
 
@@ -902,10 +921,7 @@ void *dev2kcpm(void *data)
 void *dev2kcp(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
-    // if (pthread_sigmask(SIG_BLOCK, &kcps->dev2kcp_sigset, NULL) != 0)
-    // {
-    //     logging("warning", "error to pthread_sigmask dev2kcp_sigset.");
-    // }
+
     char buff[RCV_BUFF_LEN];
     mcrypt_t en_mcrypt;
     _init_mcrypt(&en_mcrypt, kcps->key);
