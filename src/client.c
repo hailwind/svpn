@@ -34,6 +34,7 @@ static const struct option long_option[]={
     {"with-lz4",no_argument,NULL,'Z'},
     {"no-crypt",no_argument,NULL,'C'},
     {"no-recombine", no_argument, NULL, 'R'},
+    {"cpu-affinity", no_argument, NULL, 'a'},
     {"crypt-key",required_argument,NULL,'k'},
     {"crypt-algo",required_argument,NULL,'A'},
     {"crypt-mode",required_argument,NULL,'M'},
@@ -61,6 +62,7 @@ int main(int argc, char *argv[]) {
     int role=CLIENT; 
     int mode=3;
     int minrto=RX_MINRTO;
+    int cpu_affinity = 0;
     int lz4=false; 
     int debug=false; 
     int recombine=true; //frame re recombine
@@ -99,7 +101,9 @@ int main(int argc, char *argv[]) {
                 mode = atoi(optarg); break;
             case 'r':
                 minrto = atoi(optarg); break;
-            case 'd': 
+            case 'a':
+                cpu_affinity = 1; break;
+            case 'd':
                 debug=true; break;
             case 'h': 
                 print_help(); exit(0);
@@ -113,7 +117,8 @@ int main(int argc, char *argv[]) {
         logging("notice", "no key input or key too long, the length must be between 16 and 32");
         exit(1);
     }
-    init_global_config(role, mode, minrto, lz4, recombine, debug, crypt, crypt_algo, crypt_mode);
+    init_global_config(role, mode, minrto, lz4, recombine, debug, \
+        crypt, crypt_algo, crypt_mode, cpu_affinity);
     init_server_config(server_addr, server_port);
     print_params();
 

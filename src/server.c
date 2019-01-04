@@ -86,7 +86,7 @@ void send_fifo(int fifo_fd, char *cmd, char *conv, char *key)
     strcat(buf, cmd);
     strcat(buf, "&");
     strcat(buf, conv);
-    if (key && length(key) >= 16 && length(key) <= 32)
+    if (key && strlen(key) >= 16 && strlen(key) <= 32)
     {
         strcat(buf, "&");
         strcat(buf, key);
@@ -217,6 +217,7 @@ struct option long_option[] = {
     {"with-lz4", no_argument, NULL, 'Z'},
     {"no-crypt", no_argument, NULL, 'C'},
     {"no-recombine", no_argument, NULL, 'R'},
+    {"cpu-affinity", no_argument, NULL, 'a'},
     {"crypt-key", required_argument, NULL, 'k'},
     {"crypt-algo", required_argument, NULL, 'A'},
     {"crypt-mode", required_argument, NULL, 'M'},
@@ -247,13 +248,13 @@ int main(int argc, char *argv[])
     int role=SERVER; 
     int mode=3;
     int minrto=RX_MINRTO;
+    int cpu_affinity = 0;
     int lz4=false; 
     int recombine=true; //frame re recombine
     int debug=false; 
     int crypt=true; 
     char *crypt_algo=MCRYPT_TWOFISH; 
     char *crypt_mode=MCRYPT_CBC;
-    
     char *cmd = NULL;
     char *conv = NULL;
     char *key = NULL;
@@ -285,6 +286,8 @@ int main(int argc, char *argv[])
             mode = atoi(optarg); break;
         case 'r':
             minrto = atoi(optarg); break;
+        case 'a':
+            cpu_affinity = 1; break;
         case 'X':
             cmd = "DEL"; conv = optarg; break;
         case 'Y':
@@ -300,7 +303,8 @@ int main(int argc, char *argv[])
         print_help();
         exit(1);
     }
-    init_global_config(role, mode, minrto, lz4, recombine, debug, crypt, crypt_algo, crypt_mode);
+    init_global_config(role, mode, minrto, lz4, recombine, debug, \
+        crypt, crypt_algo, crypt_mode, cpu_affinity);
     if (cmd && conv)
     {
         int fifo_fd = open_fifo(server_addr, server_port, 'W');

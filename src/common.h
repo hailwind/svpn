@@ -123,7 +123,7 @@ void print_params();
 
 void init_ulimit();
 
-void init_global_config(int role, int mode, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode);
+void init_global_config(int role, int mode, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode, int cpu_affinity);
 
 void init_server_config(char *server_addr, int server_port);
 

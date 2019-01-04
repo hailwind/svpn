@@ -1,0 +1,5 @@
+package: sedge-vpn
+version: 0.1.0
+architecture: amd64
+maintainer: syscloud
+description: sedge(smart edge os) vpn

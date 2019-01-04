@@ -25,6 +25,7 @@ struct main_st
     char address[128];
     int port;
     int minrto;
+    int cpu_affinity;
 };
 typedef struct main_st main_t;
 static main_t *global_main;
@@ -140,7 +141,7 @@ void _erase_pid(char *role, char *ipaddr, int id)
     unlink(f_name);
 }
 
-void init_global_config(int role, int mode, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode)
+void init_global_config(int role, int mode, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode, int cpu_affinity)
 {
     debug = debug_param;
 
@@ -150,6 +151,7 @@ void init_global_config(int role, int mode, int minrto, int lz4, int recombine, 
     global_main->role = role;
     global_main->mode = mode;
     global_main->minrto = minrto;
+    global_main->cpu_affinity = cpu_affinity;
 
     global_crypt = malloc(sizeof(crypt_t));
     global_crypt->crypt = crypt;
@@ -206,40 +208,62 @@ void print_params()
     printf("Crypt Mode        : %s\n", global_crypt->crypt_mode);
     printf("<<<<<<<<<<<<<<<<<<<parameters===================\n");
 }
+/*
+readudp,(0)->kcp2dev(M)(1)
+			\kcp2devd(D)(2)
 
+readdev(M)(0)
+	\dev2kcp(D)(3)
+
+kcpupdate(3)
+*/
 int _set_cpu_affinity(pthread_t tid, char *name)
 {
-    return -1; //not apply.
-    if (global_main->role == SERVER)
-    {
-        return -1;
+    int cpu = -1;
+    if (global_main->cpu_affinity==0) {
+        return cpu;
     }
-    else
+
+    int cpus = get_nprocs();
+    if (cpus == 1)
     {
-        int cpus = get_nprocs();
-        if (cpus == 1)
-        {
-            return -1;
-        }
-        cpu_set_t mask;
-        if (cpus == 2)
-        {
-            CPU_ZERO(&mask);
-            if (strncmp("kcp2dev", name, 7) == 0)
-            {
-                CPU_SET(0, &mask);
-            }
-            else if (strncmp("dev2kcp", name, 7) == 0)
-            {
-                CPU_SET(0, &mask);
-            }
-            else if (strncmp("dev2kcpm", name, 8) == 0)
-            {
-                CPU_SET(1, &mask);
-            }
-            pthread_setaffinity_np(tid, sizeof(mask), &mask);
-        }
+        return cpu;
     }
+    cpu_set_t mask;
+    if (cpus == 4)
+    {
+        CPU_ZERO(&mask);
+        if (strcmp("readudp", name) == 0)
+        {
+            CPU_SET(0, &mask);
+            cpu = 0;
+        }
+        else if (strcmp("readdev", name) == 0)
+        {
+            CPU_SET(0, &mask);
+            cpu = 0;
+        }
+        else if (strcmp("kcp2dev", name) == 0)
+        {
+            CPU_SET(1, &mask);
+            cpu = 1;
+        }
+        else if (strcmp("kcp2devd", name) == 0)
+        {
+            CPU_SET(2, &mask);
+            cpu = 2;
+        }
+        else if (strcmp("dev2kcp", name) == 0)
+        {
+            CPU_SET(3, &mask);
+            cpu = 3;
+        }else{
+            CPU_SET(3, &mask);
+            cpu = 3;
+        }
+        pthread_setaffinity_np(tid, sizeof(mask), &mask);
+    }
+    return cpu;
 }
 
 void start_thread(pthread_t *tid, char *name, void *func, void *param)
@@ -781,7 +805,7 @@ void *_en_write_udp(kcpsess_t *kcps, mcrypt_t *en_mcrypt, frame_t *frame)
     int y = ikcp_send(kcps->kcp, buff, cnt + 4);
     ikcp_flush(kcps->kcp);
     pthread_mutex_unlock(&kcps->ikcp_mutex);
-    logging("dev2kcp", "ikcp_send: %d", cnt);
+    logging("_en_write_udp", "ikcp_send: %d", cnt);
 }
 
 void *readdev(void *data)
