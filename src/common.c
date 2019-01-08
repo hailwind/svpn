@@ -503,9 +503,11 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd)
     strcpy(ps->key, key);
     pthread_mutex_t ikcp_mutex = PTHREAD_MUTEX_INITIALIZER;
     ps->ikcp_mutex = ikcp_mutex;
-
+    
     ps->dev2kcp_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
     ps->kcp2dev_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
+    
+    _init_kcp(ps);
     logging("init_kcpsess", "kcps: %p", ps);
     return ps;
 }
@@ -618,46 +620,20 @@ uint32_t get_conv(void *buf)
     return conv_id;
 }
 
-int _check_kcp(kcpsess_t *kcps, int waiting)
-{
-    if (!kcps->kcp || kcps->kcp->state == -1)
-    {
-        if (waiting == true)
-        {
-            int i = 0;
-            for (i = 0; i++; i < 3)
-            {
-                if (kcps->kcp && kcps->kcp->state == 0)
-                {
-                    return 0;
-                }
-                sleep(1);
-            }
-        }
-        if (!kcps->kcp || kcps->kcp->state == -1)
-        {
-            logging("warning", "init kcp.");
-            pthread_mutex_lock(&kcps->ikcp_mutex);
-            _init_kcp(kcps);
-            pthread_mutex_unlock(&kcps->ikcp_mutex);
-            return 1;
-        }
-    }
-}
-
 int _check_kcp_client(kcpsess_t *kcps, char *buff)
 {
-    _check_kcp(kcps, false);
     if (get_una(buff) == 0 && kcps->kcp->rcv_nxt > 0)
     {
         logging("notice", "server restart?");
         pthread_mutex_lock(&kcps->ikcp_mutex);
         _init_kcp(kcps);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
+        return 1;
     }
+    return 0;
 }
 
-void _check_kcp_server(kcpsess_t *kcps, int sock_fd, struct sockaddr_in *client, socklen_t client_len)
+void _check_kcp_server(kcpsess_t *kcps, int sock_fd, struct sockaddr_in *client, socklen_t client_len, char *buff)
 {
     if (memcmp(&kcps->dst, client, client_len) != 0)
     {
@@ -727,7 +703,7 @@ void *readudp_server(void *data)
             kcpsess_t *kcps = (kcpsess_t *)node;
             logging("readudp_server", "state: %d, cmd %c, conv: %d, sn: %d, una: %d, rcv_nxt %d, snd_nxt %d, length: %d", kcps->kcp->state, get_cmd(buff), get_conv(buff), get_sn(buff), get_una(buff), kcps->kcp->rcv_nxt, kcps->kcp->snd_nxt, cnt);
             logging("readudp_server", "recv udp packet: %d addr: %s port: %d", cnt, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
-            _check_kcp_server(kcps, server_listen->sock_fd, &client, client_len);
+            _check_kcp_server(kcps, server_listen->sock_fd, &client, client_len, buff);
 
             pthread_mutex_lock(&kcps->ikcp_mutex);
             int ret = ikcp_input(kcps->kcp, buff, cnt);
@@ -770,7 +746,7 @@ int _is_m_frame(char *buff)
 12,13 int16 帧6的长度
 14,15 int16 帧7的长度
 */
-void *_en_write_udp(kcpsess_t *kcps, mcrypt_t *en_mcrypt, frame_t *frame)
+void _en_write_udp(kcpsess_t *kcps, mcrypt_t *en_mcrypt, frame_t *frame)
 {
     char buff[RCV_BUFF_LEN];
     int cnt = 0;
@@ -798,7 +774,6 @@ void *_en_write_udp(kcpsess_t *kcps, mcrypt_t *en_mcrypt, frame_t *frame)
     {
         logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
     }
-    _check_kcp(kcps, true);
     uint32_t label = M_LABEL;
     memcpy(buff + cnt, &label, 4);
     pthread_mutex_lock(&kcps->ikcp_mutex);
@@ -898,7 +873,6 @@ void *kcp2dev(void *data)
         //     continue;
         // }
         // logging("kcp2dev", "receive a writedev_sigset.");
-        _check_kcp(kcps, true);
         pthread_mutex_lock(&kcps->ikcp_mutex);
         int cnt = ikcp_recv(kcps->kcp, buff, RCV_BUFF_LEN);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
@@ -1003,7 +977,6 @@ void *dev2kcp(void *data)
                 logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
                 continue;
             }
-            _check_kcp(kcps, true);
             pthread_mutex_lock(&kcps->ikcp_mutex);
             int y = ikcp_send(kcps->kcp, buff, cnt);
             ikcp_flush(kcps->kcp);
@@ -1036,7 +1009,7 @@ void _kcpupdate(kcpsess_t *kcps)
 {
     if (kcps->kcp)
     {
-        logging("kcpupdate", "ikcp_update.");
+        // logging("kcpupdate", "ikcp_update.");
         pthread_mutex_lock(&kcps->ikcp_mutex);
         ikcp_update(kcps->kcp, iclock());
         pthread_mutex_unlock(&kcps->ikcp_mutex);
