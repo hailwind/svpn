@@ -667,15 +667,43 @@ void _check_kcp_server(kcpsess_t *kcps, int sock_fd, struct sockaddr_in *client,
     }
 }
 
+int init_socket()
+{
+    int sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock_fd < 0)
+    {
+        logging("warning", "create socket fail!");
+        return -1;
+    }
+    struct timeval timeOut; timeOut.tv_sec = 60;
+    timeOut.tv_usec = 0;
+    if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &timeOut, sizeof(timeOut)) < 0)
+    {
+        logging("warning", "time out setting failed");
+    }
+    return sock_fd;
+}
+
+void _renew_socket(kcpsess_t *kcps)
+{
+    int sock_fd = init_socket();
+    close(kcps->sock_fd);
+    kcps->sock_fd = sock_fd;
+    logging("notice", "renew socket, sock_fd: %d", kcps->sock_fd);
+}
+
 void *readudp_client(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
     char buff[RCV_BUFF_LEN];
-    while (1)
+    while (kcps->dead == 0)
     {
         int cnt = recvfrom(kcps->sock_fd, buff, RCV_BUFF_LEN, 0, (struct sockaddr *)&kcps->dst, &(kcps->dst_len));
         if (cnt < 24) //24(KCP)
         {
+            if (cnt==-1 && errno == EAGAIN) {
+                _renew_socket(kcps);
+            }
             continue;
         }
         logging("readudp_client", "state: %d, cmd %c, conv: %d, sn: %d, una: %d, snd_una %d, rcv_nxt %d, snd_nxt %d, length: %d", kcps->kcp->state, get_cmd(buff), get_conv(buff), get_sn(buff), get_una(buff), kcps->kcp->snd_una, kcps->kcp->rcv_nxt, kcps->kcp->snd_nxt, cnt);
@@ -826,7 +854,7 @@ void *readdev(void *data)
 
 void de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
 {
-    logging("kcp2dev", "ikcp_recv: %d", len);
+    logging("de_write_dev", "ikcp_recv: %d", len);
     int cnt = _decrypt_decompress(kcps, de_mcrypt, buff, len);
     if (cnt == -1)
     {
@@ -849,14 +877,14 @@ void de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
             uint16_t frm_size;
             memcpy(&frm_size, buff + (i + 1) * 2, 2);
             int y = write(kcps->dev_fd, buff + position, frm_size);
-            logging("kcp2dev", "write to dev: idx: %d, position: %d, size: %d, wrote: %d", i, position, frm_size, y);
+            logging("de_write_dev", "write to dev: idx: %d, position: %d, size: %d, wrote: %d", i, position, frm_size, y);
             position += frm_size;
         }
     }
     else
     {
         int w = write(kcps->dev_fd, buff, cnt);
-        logging("kcp2dev", "wrote dev: %d", w);
+        logging("de_write_dev", "wrote dev: %d", w);
     }
 }
 
@@ -869,12 +897,23 @@ int _is_m_packet(char *buff, int len)
 void *kcp2dev(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
+    // if (pthread_sigmask(SIG_BLOCK, &kcps->kcp2dev_sigset, NULL) != 0)
+    // {
+    //     logging("warning", "error to pthread_sigmask writedev_sigset.");
+    // }
     mcrypt_t de_mcrypt;
     _init_mcrypt(&de_mcrypt, kcps->key);
     int sleep_times;
     char buff[RCV_BUFF_LEN];
     while (kcps->dead == 0)
     {
+        // int sig;
+        // if (sigwait(&kcps->kcp2dev_sigset, &sig) == -1)
+        // {
+        //     logging("warning", "error sigwait.");
+        //     continue;
+        // }
+        // logging("kcp2dev", "receive a writedev_sigset.");
         pthread_mutex_lock(&kcps->ikcp_mutex);
         int cnt = ikcp_recv(kcps->kcp, buff, RCV_BUFF_LEN);
         pthread_mutex_unlock(&kcps->ikcp_mutex);

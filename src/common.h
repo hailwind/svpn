@@ -99,12 +99,15 @@ struct _kcpsess_st
 
     pthread_mutex_t ikcp_mutex;
 
+    pthread_t readudpt;
+
     pthread_t readdevt;
     pthread_t readkcpt;
 
     pthread_t kcp2devt;
     pthread_t kcp2devdt;
     rqueue_t *kcp2dev_queue;
+    //sigset_t kcp2dev_sigset;
 
     pthread_t dev2kcpt;
     rqueue_t *dev2kcp_queue;
@@ -145,6 +148,8 @@ void set_cpu_affinity();
 
 int init_tap(int conv);
 
+int init_socket();
+
 kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd);
 
 int udp_output(const char *buf, int len, ikcpcb *kcp, void *user);
@@ -180,7 +185,7 @@ static inline void itimeofday(long *sec, long *usec)
 	if (usec) *usec = time.tv_usec;
 }
 
-static int64_t timstamp()
+static int64_t timestamp()
 {    
 	struct timeval tv;    
 	gettimeofday(&tv,NULL);

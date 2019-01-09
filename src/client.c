@@ -7,19 +7,12 @@ void print_help() {
 
 void start_conv(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
 {
-    int sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock_fd < 0)
-    {
-        logging("error", "create socket fail!");
-        exit(EXIT_FAILURE);
-    }
+    int sock_fd = init_socket();
     kcpsess_t *kcps = init_kcpsess(conv, dev_fd, key, sock_fd);
     kcps->dst = *dst;
     kcps->dst_len = sizeof(struct sockaddr_in);
-    //sigaddset(&kcps->dev2kcpm_sigset, SIGRTMIN + 1);
-    //sigaddset(&kcps->kcp2devm_sigset, SIGRTMIN);
-    pthread_t readudpt;
-    start_thread(&readudpt, "readudp", readudp_client, (void *)kcps);
+    //sigaddset(&kcps->readudp_sigset, SIGRTMIN);
+    start_thread(&kcps->readudpt, "readudp", readudp_client, (void *)kcps);
     start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
     start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
     start_thread(&kcps->kcp2devdt, "kcp2devd", kcp2devd, (void *)kcps);
