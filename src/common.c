@@ -713,6 +713,7 @@ void *readudp_client(void *data)
         int ret = ikcp_input(kcps->kcp, buff, cnt);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
     }
+    return NULL;
 }
 
 void *readudp_server(void *data)
