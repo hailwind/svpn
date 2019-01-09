@@ -408,7 +408,7 @@ int init_tap(int conv)
 void _init_kcp(kcpsess_t *ps)
 {
     ikcpcb *kcp_ = ikcp_create(ps->conv, ps);
-    logging("init_kcp", "ikcp_create, kcps: %p, kcp: %p, buffer: %p", ps, kcp_, kcp_->buffer);
+    logging("init_kcp", "ikcp_create, conv: %d kcps: %p, kcp: %p, buffer: %p", ps->conv, ps, kcp_, kcp_->buffer);
     int mode = global_main->mode;
     // 启动快速模式
     // 第二个参数 nodelay-启用以后若干常规加速将启动
@@ -620,11 +620,23 @@ uint32_t get_conv(void *buf)
     return conv_id;
 }
 
+/*
+ack包中的una 对端记录的本地的snd_una
+ack包中的sn 对端ack发回的本地的sn
+
+数据包中的una 对端记录的本地的snd_una
+数据包中的sn 对端发来的对端的sn
+
+本地kcp的snd_nxt 本地下一次发送的sn
+本地kcp的rcv_nxt 本地记录的对端下一次的sn
+本地kcp的snd_una 本地发送未被对端ack的本地的sn
+*/
+// 判断对端重启的逻辑:　数据包，带过来的SN归0，带过来的本地的una归0，并且本地的snd_una不为0，即不是双方刚刚新启动.
 int _check_kcp_client(kcpsess_t *kcps, char *buff)
 {
-    if (get_una(buff) == 0 && kcps->kcp->rcv_nxt > 0)
+    if (get_cmd(buff)==81 && get_sn(buff)==0 && get_una(buff) == 0 && kcps->kcp->snd_una != 0)
     {
-        logging("notice", "server restart?");
+        logging("notice", "server restart? snd_una: %d", kcps->kcp->snd_una);
         pthread_mutex_lock(&kcps->ikcp_mutex);
         _init_kcp(kcps);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
@@ -635,24 +647,24 @@ int _check_kcp_client(kcpsess_t *kcps, char *buff)
 
 void _check_kcp_server(kcpsess_t *kcps, int sock_fd, struct sockaddr_in *client, socklen_t client_len, char *buff)
 {
+    if (kcps->sock_fd == -1)
+    {
+        logging("notice", "sock_fd is not initial, set kcps->sock_fd : %d", sock_fd);
+        kcps->sock_fd = sock_fd;
+    }
     if (memcmp(&kcps->dst, client, client_len) != 0)
     {
         memcpy(&kcps->dst, client, client_len);
         kcps->dst_len = client_len;
-        if (kcps->sock_fd == -1)
-        {
-            logging("notice", "set kcps->sock_fd : %d", sock_fd);
-            kcps->sock_fd = sock_fd;
-        }
-        logging("notice", "set kcps->dst : %p, reinit kcp.", client);
+        logging("notice", "client addr or port changed, addr: %s port: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
+    }
+    if (get_cmd(buff)==81 && get_sn(buff)==0 && get_una(buff) == 0 && kcps->kcp->snd_una != 0)
+    {
+        logging("notice", "client restart? snd_una: %d", kcps->kcp->snd_una);
         pthread_mutex_lock(&kcps->ikcp_mutex);
         _init_kcp(kcps);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
     }
-}
-
-void *alive(void *data)
-{
 }
 
 void *readudp_client(void *data)
@@ -666,7 +678,7 @@ void *readudp_client(void *data)
         {
             continue;
         }
-        logging("readudp_client", "state: %d, cmd %c, conv: %d, sn: %d, una: %d, rcv_nxt %d, snd_nxt %d, length: %d", kcps->kcp->state, get_cmd(buff), get_conv(buff), get_sn(buff), get_una(buff), kcps->kcp->rcv_nxt, kcps->kcp->snd_nxt, cnt);
+        logging("readudp_client", "state: %d, cmd %c, conv: %d, sn: %d, una: %d, snd_una %d, rcv_nxt %d, snd_nxt %d, length: %d", kcps->kcp->state, get_cmd(buff), get_conv(buff), get_sn(buff), get_una(buff), kcps->kcp->snd_una, kcps->kcp->rcv_nxt, kcps->kcp->snd_nxt, cnt);
         logging("readudp_client", "recv udp packet: %d addr: %s port: %d", cnt, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
         _check_kcp_client(kcps, buff);
         pthread_mutex_lock(&kcps->ikcp_mutex);
@@ -701,7 +713,7 @@ void *readudp_server(void *data)
             size_t node_len;
             void *node = ht_get(server_listen->conn_map, conv_str, length(conv_str), &node_len);
             kcpsess_t *kcps = (kcpsess_t *)node;
-            logging("readudp_server", "state: %d, cmd %c, conv: %d, sn: %d, una: %d, rcv_nxt %d, snd_nxt %d, length: %d", kcps->kcp->state, get_cmd(buff), get_conv(buff), get_sn(buff), get_una(buff), kcps->kcp->rcv_nxt, kcps->kcp->snd_nxt, cnt);
+            logging("readudp_server", "state: %d, cmd %c, conv: %d, sn: %d, una: %d, snd_una %d, rcv_nxt %d, snd_nxt %d, length: %d", kcps->kcp->state, get_cmd(buff), get_conv(buff), get_sn(buff), get_una(buff), kcps->kcp->snd_una, kcps->kcp->rcv_nxt, kcps->kcp->snd_nxt, cnt);
             logging("readudp_server", "recv udp packet: %d addr: %s port: %d", cnt, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
             _check_kcp_server(kcps, server_listen->sock_fd, &client, client_len, buff);
 
@@ -809,6 +821,7 @@ void *readdev(void *data)
             logging("notice", "read from tap dev faile: %d", frame->len);
         }
     }
+    return NULL;
 }
 
 void de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
@@ -856,23 +869,12 @@ int _is_m_packet(char *buff, int len)
 void *kcp2dev(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
-    // if (pthread_sigmask(SIG_BLOCK, &kcps->kcp2dev_sigset, NULL) != 0)
-    // {
-    //     logging("warning", "error to pthread_sigmask writedev_sigset.");
-    // }
     mcrypt_t de_mcrypt;
     _init_mcrypt(&de_mcrypt, kcps->key);
     int sleep_times;
     char buff[RCV_BUFF_LEN];
     while (kcps->dead == 0)
     {
-        // int sig;
-        // if (sigwait(&kcps->kcp2dev_sigset, &sig) == -1)
-        // {
-        //     logging("warning", "error sigwait.");
-        //     continue;
-        // }
-        // logging("kcp2dev", "receive a writedev_sigset.");
         pthread_mutex_lock(&kcps->ikcp_mutex);
         int cnt = ikcp_recv(kcps->kcp, buff, RCV_BUFF_LEN);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
@@ -904,6 +906,7 @@ void *kcp2dev(void *data)
         }
     }
     logging("notice", "writedev thread go to dead, conv: %d", kcps->conv);
+    return NULL;
 }
 
 void *kcp2devd(void *data)
@@ -923,6 +926,7 @@ void *kcp2devd(void *data)
         }
         isleep(5);
     }
+    return NULL;
 }
 
 /*
@@ -985,6 +989,7 @@ void *dev2kcp(void *data)
         }
         isleep(1);
     }
+    return NULL;
 }
 
 int udp_output(const char *buf, int len, ikcpcb *kcp, void *user)
