@@ -692,6 +692,53 @@ void _renew_socket(kcpsess_t *kcps)
     logging("notice", "renew socket, sock_fd: %d", kcps->sock_fd);
 }
 
+int _is_m_frame(char *buff)
+{
+    struct ether_header *eth_header;
+    eth_header = (struct ether_header *)buff;
+    uint16_t ether_type = ntohs(eth_header->ether_type);
+    //printf("ehter_type: %#x\n", ether_type);
+    if (ether_type == ETHERTYPE_IP)
+    {
+        struct ip *ip_packet = (struct ip *)(buff + 14);
+        //printf("len %d proto: %#x\n", ntohs(ip_packet->ip_len), ip_packet->ip_p);
+        if (ip_packet->ip_p == 0x1)
+        {
+            //printf("icmp\n");
+            return 1;
+        }
+    }
+    else if (ether_type == ETHERTYPE_ARP)
+    {
+        //printf("arp\n");
+        return 1;
+    }
+    return 0;
+}
+
+void _direct_write_udp(kcpsess_t *kcps, frame_t *frame)
+{
+    char buff[RCV_BUFF_LEN];
+    int cnt = 0;
+    memcpy(buff, &kcps->conv, 4); 
+    memcpy(buff + 4, frame->buff, frame->len);
+    cnt = frame->len + 4;
+    free(frame);
+
+    cnt = sendto(kcps->sock_fd, buff, cnt, 0, (struct sockaddr *)&kcps->dst, kcps->dst_len);
+    if (cnt < 0)
+    {
+        logging("warning", "send udp packet failed, addr: %s port: %d.", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
+    }
+    logging("_direct_write_udp", "udp sendto: %d", cnt);
+}
+
+void _direct_write_dev(kcpsess_t *kcps, char *buff, int len)
+{
+    int w = write(kcps->dev_fd, buff, len);
+    logging("direct_write_dev", "wrote dev: %d", w);
+}
+
 void *readudp_client(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
@@ -699,6 +746,15 @@ void *readudp_client(void *data)
     while (kcps->dead == 0)
     {
         int cnt = recvfrom(kcps->sock_fd, buff, RCV_BUFF_LEN, 0, (struct sockaddr *)&kcps->dst, &(kcps->dst_len));
+        if (cnt < 0)
+        {
+            continue;
+        }
+        if (_is_m_frame(buff + 4) == 1)
+        {
+            _direct_write_dev(kcps, buff + 4, cnt-4);
+            continue;
+        }
         if (cnt < 24) //24(KCP)
         {
             if (cnt==-1 && errno == EAGAIN) {
@@ -725,6 +781,30 @@ void *readudp_server(void *data)
     while (1)
     {
         int cnt = recvfrom(server_listen->sock_fd, buff, RCV_BUFF_LEN, 0, (struct sockaddr *)&client, &client_len);
+        if (cnt < 0)
+        {
+            continue;
+        }
+        if (_is_m_frame(buff + 4) == 1)
+        {
+            char conv_str[8];
+            bzero(conv_str, 8);
+            sprintf(conv_str, "%d", get_conv(buff));
+            if (ht_exists(server_listen->conn_map, conv_str, length(conv_str)) == 0)
+            {
+                logging("notice", "CONV NOT EXISTS or NOT INIT COMPLETED %s", conv_str);
+                continue;
+            }
+            else
+            {
+                size_t node_len;
+                void *node = ht_get(server_listen->conn_map, conv_str, length(conv_str), &node_len);
+                kcpsess_t *kcps = (kcpsess_t *)node;
+                _direct_write_dev(kcps, buff + 4, cnt-4);
+                continue;
+            }
+        }
+        
         if (cnt < 24) //24(KCP)
         {
             continue;
@@ -753,29 +833,6 @@ void *readudp_server(void *data)
     }
 }
 
-int _is_m_frame(char *buff)
-{
-    struct ether_header *eth_header;
-    eth_header = (struct ether_header *)buff;
-    uint16_t ether_type = ntohs(eth_header->ether_type);
-    //printf("ehter_type: %#x\n", ether_type);
-    if (ether_type == ETHERTYPE_IP)
-    {
-        struct ip *ip_packet = (struct ip *)(buff + 14);
-        //printf("len %d proto: %#x\n", ntohs(ip_packet->ip_len), ip_packet->ip_p);
-        if (ip_packet->ip_p == 0x1)
-        {
-            //printf("icmp\n");
-            return 1;
-        }
-    }
-    else if (ether_type == ETHERTYPE_ARP)
-    {
-        //printf("arp\n");
-        return 1;
-    }
-    return 0;
-}
 
 /*
 0,1 int16 总帧数
@@ -787,42 +844,42 @@ int _is_m_frame(char *buff)
 12,13 int16 帧6的长度
 14,15 int16 帧7的长度
 */
-void _en_write_udp(kcpsess_t *kcps, mcrypt_t *en_mcrypt, frame_t *frame)
-{
-    char buff[RCV_BUFF_LEN];
-    int cnt = 0;
-    if (global_main->recombine == true)
-    {
-        uint16_t total_frms = 0;
-        uint16_t position = 16;
-        cnt = 16;
-        total_frms++;
-        memcpy(buff + total_frms * 2, &frame->len, 2);    // frame length.
-        memcpy(buff + position, frame->buff, frame->len); // frame content.
-        position += frame->len;
-        cnt += frame->len;
-        free(frame);
-        memcpy(buff, &total_frms, 2);
-    }
-    else
-    {
-        memcpy(buff, frame->buff, frame->len);
-        cnt = frame->len;
-        free(frame);
-    }
-    cnt = _encrypt_encompress(kcps, en_mcrypt, buff, cnt);
-    if (cnt == -1)
-    {
-        logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
-    }
-    uint32_t label = M_LABEL;
-    memcpy(buff + cnt, &label, 4);
-    pthread_mutex_lock(&kcps->ikcp_mutex);
-    int y = ikcp_send(kcps->kcp, buff, cnt + 4);
-    ikcp_flush(kcps->kcp);
-    pthread_mutex_unlock(&kcps->ikcp_mutex);
-    logging("_en_write_udp", "ikcp_send: %d", cnt);
-}
+// void _en_write_udp(kcpsess_t *kcps, mcrypt_t *en_mcrypt, frame_t *frame)
+// {
+//     char buff[RCV_BUFF_LEN];
+//     int cnt = 0;
+//     if (global_main->recombine == true)
+//     {
+//         uint16_t total_frms = 0;
+//         uint16_t position = 16;
+//         cnt = 16;
+//         total_frms++;
+//         memcpy(buff + total_frms * 2, &frame->len, 2);    // frame length.
+//         memcpy(buff + position, frame->buff, frame->len); // frame content.
+//         position += frame->len;
+//         cnt += frame->len;
+//         free(frame);
+//         memcpy(buff, &total_frms, 2);
+//     }
+//     else
+//     {
+//         memcpy(buff, frame->buff, frame->len);
+//         cnt = frame->len;
+//         free(frame);
+//     }
+//     cnt = _encrypt_encompress(kcps, en_mcrypt, buff, cnt);
+//     if (cnt == -1)
+//     {
+//         logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
+//     }
+//     uint32_t label = M_LABEL;
+//     memcpy(buff + cnt, &label, 4);
+//     pthread_mutex_lock(&kcps->ikcp_mutex);
+//     int y = ikcp_send(kcps->kcp, buff, cnt + 4);
+//     ikcp_flush(kcps->kcp);
+//     pthread_mutex_unlock(&kcps->ikcp_mutex);
+//     logging("_en_write_udp", "ikcp_send: %d", cnt);
+// }
 
 void *readdev(void *data)
 {
@@ -838,7 +895,8 @@ void *readdev(void *data)
             logging("readdev", "read tap: %d", frame->len);
             if (_is_m_frame(frame->buff) == 1)
             {
-                _en_write_udp(kcps, &en_mcrypt, frame);
+                //_en_write_udp(kcps, &en_mcrypt, frame);
+                _direct_write_udp(kcps, frame);
             }
             else
             {
