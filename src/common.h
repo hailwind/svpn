@@ -37,6 +37,7 @@
 
 #ifndef _SVPN_COMMON_
 #define ENABLED_LOG {"notice", "warning", "error", "init_tap", "init_mcrypt"}
+#define DEFAULT_ADDRESS_ANY "0.0.0.0"
 #define DEFAULT_SERVER_PORT 8888
 
 #define SND_WINDOW 16384
@@ -86,20 +87,23 @@ typedef struct _frame_st frame_t;
 struct _kcpsess_st
 {
     int dead;
-
+    
     ikcpcb *kcp;
     int conv;
 
     char key[64];
 
     int dev_fd;
-    int sock_fd;
+
+    char bind_arr[8][16];
+    int sock_fd_arr[8];
+    int sock_fd_count;
+
+    int64_t dst_update_time;
     struct sockaddr_in dst;
     socklen_t dst_len;
 
     pthread_mutex_t ikcp_mutex;
-
-    pthread_t readudpt;
 
     pthread_t readdevt;
     pthread_t readkcpt;
@@ -113,6 +117,13 @@ struct _kcpsess_st
     rqueue_t *dev2kcp_queue;
 };
 typedef struct _kcpsess_st kcpsess_t;
+
+struct _client_kcps_st
+{
+    int idx;
+    kcpsess_t *kcps;
+};
+typedef struct _client_kcps_st client_kcps_t;
 
 struct _server_listen_st
 {
@@ -148,9 +159,9 @@ void set_cpu_affinity();
 
 int init_tap(int conv);
 
-int init_socket();
+int binding(char *bind_addr, int port);
 
-kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd);
+kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key);
 
 int udp_output(const char *buf, int len, ikcpcb *kcp, void *user);
 

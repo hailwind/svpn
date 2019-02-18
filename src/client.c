@@ -1,18 +1,36 @@
 #include "common.h"
 
 void print_help() {
-    printf("client --server=192.168.1.1 [--port=8888] --conv=28445 [--with-lz4] [--no-recombine] [--no-crypt] --crypt-key=0123456789012345678901234567890 [--crypt-algo=twofish] [--crypt-mode=cbc] [--mode=3] [--minrto=20] [--debug]\n");
+    printf("client [--cbind=192.168.10.2,192.168.10.3] --server=192.168.1.1 [--port=8888] --conv=28445 [--with-lz4] [--no-recombine] [--no-crypt] --crypt-key=0123456789012345678901234567890 [--crypt-algo=twofish] [--crypt-mode=cbc] [--mode=3] [--minrto=20] [--debug]\n");
     exit(0);
 }
 
-void start_conv(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
+void start_conv(int dev_fd, int conv, char *c_bind, struct sockaddr_in *dst, char *key)
 {
-    int sock_fd = init_socket();
-    kcpsess_t *kcps = init_kcpsess(conv, dev_fd, key, sock_fd);
+    kcpsess_t *kcps = init_kcpsess(conv, dev_fd, key);
     kcps->dst = *dst;
     kcps->dst_len = sizeof(struct sockaddr_in);
+    
+    int cnt = 0;
+    char *mPtr = NULL;
+    mPtr = strtok(c_bind, ",");
+    while (mPtr != NULL) {
+        strcpy(kcps->bind_arr[cnt], mPtr);
+        int sock_fd = binding(kcps->bind_arr[cnt], 0);
+        kcps->sock_fd_arr[cnt]=sock_fd;
+        client_kcps_t *ck = (client_kcps_t *)malloc(sizeof(client_kcps_t));
+        ck->idx=cnt;
+        ck->kcps=kcps;
+        char str[16];
+        bzero(str, 16);
+        sprintf(str, "readudp-%d", cnt);
+        pthread_t readudpt;
+        start_thread(&readudpt, str, readudp_client, (void *)ck);
+        cnt++;
+        kcps->sock_fd_count=cnt;
+        mPtr = strtok(NULL, ",");
+    }
     //sigaddset(&kcps->readudp_sigset, SIGRTMIN);
-    start_thread(&kcps->readudpt, "readudp", readudp_client, (void *)kcps);
     start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
     start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
     start_thread(&kcps->kcp2devdt, "kcp2devd", kcp2devd, (void *)kcps);
@@ -21,6 +39,7 @@ void start_conv(int dev_fd, int conv, struct sockaddr_in *dst, char *key)
 }
 
 static const struct option long_option[]={
+    {"cbind",required_argument,NULL,'b'},
     {"server",required_argument,NULL,'s'},
     {"port",required_argument,NULL,'p'},
     {"conv",required_argument,NULL,'c'},
@@ -40,6 +59,8 @@ static const struct option long_option[]={
 
 int main(int argc, char *argv[]) {
     init_ulimit();
+    srand( (unsigned)time( NULL ) );
+
     logging("notice", "Client Starting.");
     if (signal(SIGUSR1, usr_signal) == SIG_ERR || signal(SIGUSR2, usr_signal) == SIG_ERR)
     {
@@ -50,6 +71,7 @@ int main(int argc, char *argv[]) {
         logging("warning", "Failed to register exit signal");
     }
 
+    char *c_bind=DEFAULT_ADDRESS_ANY;
     char *server_addr=NULL;
     int server_port = DEFAULT_SERVER_PORT;
     int role=CLIENT; 
@@ -72,6 +94,8 @@ int main(int argc, char *argv[]) {
         switch(opt)
         {
             case 0: break;
+            case 'b': 
+                c_bind=optarg; break;
             case 's': 
                 server_addr=optarg; break;
             case 'p': 
@@ -124,5 +148,5 @@ int main(int argc, char *argv[]) {
     ser_addr.sin_port = htons(server_port);
     logging("notice", "open server_addr: %s, server_port: %d, key: %s", server_addr, server_port, key);
 
-    start_conv(dev_fd, conv, &ser_addr, key);
+    start_conv(dev_fd, conv, c_bind, &ser_addr, key);
 }

@@ -492,21 +492,20 @@ void _init_mcrypt(mcrypt_t *mcrypt, char *key)
     }
 }
 
-kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key, int sock_fd)
+kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
 {
     kcpsess_t *ps = (kcpsess_t *)malloc(sizeof(kcpsess_t));
     bzero(ps, sizeof(kcpsess_t));
-    ps->sock_fd = sock_fd;
     ps->dev_fd = dev_fd;
     ps->conv = conv;
     ps->dead = 0;
     strcpy(ps->key, key);
     pthread_mutex_t ikcp_mutex = PTHREAD_MUTEX_INITIALIZER;
     ps->ikcp_mutex = ikcp_mutex;
-    
+
     ps->dev2kcp_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
     ps->kcp2dev_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
-    
+
     _init_kcp(ps);
     logging("init_kcpsess", "kcps: %p", ps);
     return ps;
@@ -647,16 +646,21 @@ int _check_kcp_client(kcpsess_t *kcps, char *buff)
 
 void _check_kcp_server(kcpsess_t *kcps, int sock_fd, struct sockaddr_in *client, socklen_t client_len, char *buff)
 {
-    if (kcps->sock_fd == -1)
+    if (kcps->sock_fd_arr[0] == 0)
     {
         logging("notice", "sock_fd is not initial, set kcps->sock_fd : %d", sock_fd);
-        kcps->sock_fd = sock_fd;
+        kcps->sock_fd_arr[0] = sock_fd;
+        kcps->sock_fd_count=1;
     }
-    if (memcmp(&kcps->dst, client, client_len) != 0)
-    {
-        memcpy(&kcps->dst, client, client_len);
-        kcps->dst_len = client_len;
-        logging("notice", "client addr or port changed, addr: %s port: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
+    int64_t curr = timestamp();
+    if ((curr-kcps->dst_update_time)>500) {
+        if (memcmp(&kcps->dst, client, client_len) != 0)
+        {
+            memcpy(&kcps->dst, client, client_len);
+            kcps->dst_len = client_len;
+            logging("notice", "client addr or port changed, addr: %s port: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
+        }
+        kcps->dst_update_time=curr;
     }
     if (get_cmd(buff)==81 && get_sn(buff)==0 && get_una(buff) == 0 && kcps->kcp->snd_una != 0)
     {
@@ -667,29 +671,37 @@ void _check_kcp_server(kcpsess_t *kcps, int sock_fd, struct sockaddr_in *client,
     }
 }
 
-int init_socket()
+int binding(char *bind_addr, int port)
 {
-    int sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock_fd < 0)
+    struct sockaddr_in server;
+    bzero(&server, sizeof(server));
+    int server_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (server_fd < 0)
     {
-        logging("warning", "create socket fail!");
-        return -1;
+        logging("listening", "create socket fail!");
+        exit(EXIT_FAILURE);
     }
-    struct timeval timeOut; timeOut.tv_sec = 60;
-    timeOut.tv_usec = 0;
-    if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, &timeOut, sizeof(timeOut)) < 0)
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = inet_addr(bind_addr);
+    server.sin_port = htons(port);
+    if (bind(server_fd, (struct sockaddr *)&server, sizeof(server)))
     {
-        logging("warning", "time out setting failed");
+        logging("error", "udp bind() failed %s", strerror(errno));
+        exit(EXIT_FAILURE);
     }
-    return sock_fd;
+    else
+    {
+        logging("listening", "udp bind to :%d", port);
+    }
+    return server_fd;
 }
 
-void _renew_socket(kcpsess_t *kcps)
+void _renew_socket(kcpsess_t *kcps, int idx)
 {
-    int sock_fd = init_socket();
-    close(kcps->sock_fd);
-    kcps->sock_fd = sock_fd;
-    logging("notice", "renew socket, sock_fd: %d", kcps->sock_fd);
+    int sock_fd = binding(kcps->bind_arr[idx], 0);
+    close(kcps->sock_fd_arr[idx]);
+    kcps->sock_fd_arr[idx] = sock_fd;
+    logging("notice", "renew socket, sock_fd: %d", kcps->sock_fd_arr[idx]);
 }
 
 int _is_m_frame(char *buff)
@@ -716,6 +728,19 @@ int _is_m_frame(char *buff)
     return 0;
 }
 
+int _choose_sock_fd(kcpsess_t *kcps)
+{
+    if (kcps->sock_fd_count<=0)
+    {
+        return -1;
+    }
+    if (kcps->sock_fd_count==1) {
+        return kcps->sock_fd_arr[0];
+    }
+    int idx = rand() % kcps->sock_fd_count;
+    return kcps->sock_fd_arr[idx];
+}
+
 void _direct_write_udp(kcpsess_t *kcps, frame_t *frame)
 {
     char buff[RCV_BUFF_LEN];
@@ -724,8 +749,12 @@ void _direct_write_udp(kcpsess_t *kcps, frame_t *frame)
     memcpy(buff + 4, frame->buff, frame->len);
     cnt = frame->len + 4;
     free(frame);
-
-    cnt = sendto(kcps->sock_fd, buff, cnt, 0, (struct sockaddr *)&kcps->dst, kcps->dst_len);
+    int sock_fd = _choose_sock_fd(kcps);
+    if (sock_fd==-1)
+    {
+        return;
+    }
+    cnt = sendto(sock_fd, buff, cnt, 0, (struct sockaddr *)&kcps->dst, kcps->dst_len);
     if (cnt < 0)
     {
         logging("warning", "send udp packet failed, addr: %s port: %d.", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
@@ -741,11 +770,12 @@ void _direct_write_dev(kcpsess_t *kcps, char *buff, int len)
 
 void *readudp_client(void *data)
 {
-    kcpsess_t *kcps = (kcpsess_t *)data;
+    client_kcps_t *c_kcps = (client_kcps_t *)data;
+    kcpsess_t *kcps = c_kcps->kcps;
     char buff[RCV_BUFF_LEN];
     while (kcps->dead == 0)
     {
-        int cnt = recvfrom(kcps->sock_fd, buff, RCV_BUFF_LEN, 0, (struct sockaddr *)&kcps->dst, &(kcps->dst_len));
+        int cnt = recvfrom(kcps->sock_fd_arr[c_kcps->idx], buff, RCV_BUFF_LEN, 0, (struct sockaddr *)&kcps->dst, &(kcps->dst_len));
         if (cnt < 0)
         {
             continue;
@@ -758,7 +788,7 @@ void *readudp_client(void *data)
         if (cnt < 24) //24(KCP)
         {
             if (cnt==-1 && errno == EAGAIN) {
-                _renew_socket(kcps);
+                _renew_socket(kcps, c_kcps->idx);
             }
             continue;
         }
@@ -911,7 +941,7 @@ void *readdev(void *data)
     return NULL;
 }
 
-void de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
+void _de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
 {
     logging("de_write_dev", "ikcp_recv: %d", len);
     int cnt = _decrypt_decompress(kcps, de_mcrypt, buff, len);
@@ -992,7 +1022,7 @@ void *kcp2dev(void *data)
             sleep_times = 0;
             if (_is_m_packet(buff, cnt) == 0)
             {
-                de_write_dev(kcps, &de_mcrypt, buff, cnt - 4);
+                _de_write_dev(kcps, &de_mcrypt, buff, cnt - 4);
             }
             else
             {
@@ -1019,7 +1049,7 @@ void *kcp2devd(void *data)
             frame_t *packet = (frame_t *)rqueue_read(kcps->kcp2dev_queue);
             char *buff = packet->buff;
             int cnt = packet->len;
-            de_write_dev(kcps, &de_mcrypt, buff, cnt);
+            _de_write_dev(kcps, &de_mcrypt, buff, cnt);
             free(packet);
         }
         isleep(5);
@@ -1093,13 +1123,13 @@ void *dev2kcp(void *data)
 int udp_output(const char *buf, int len, ikcpcb *kcp, void *user)
 {
     kcpsess_t *kcps = (kcpsess_t *)user;
-    if (kcps->sock_fd == -1)
+    logging("udp_output", "sent udp packet: %d, addr: %s port: %d", len, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
+    int sock_fd = _choose_sock_fd(kcps);
+    if (sock_fd==-1)
     {
-        logging("warning", "socket not opened");
         return 0;
     }
-    logging("udp_output", "sent udp packet: %d, addr: %s port: %d", len, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
-    int cnt = sendto(kcps->sock_fd, buf, len, 0, (struct sockaddr *)&kcps->dst, kcps->dst_len);
+    int cnt = sendto(sock_fd, buf, len, 0, (struct sockaddr *)&kcps->dst, kcps->dst_len);
     if (cnt < 0)
     {
         logging("warning", "send udp packet failed, addr: %s port: %d.", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));

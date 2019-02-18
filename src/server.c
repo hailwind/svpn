@@ -23,31 +23,6 @@ server --bind=192.168.1.2 [--port=8888] --add-conv=38837 --crypt-key=01234567890
 server --bind=192.168.1.2 [--port=8888] --del-conv=38837\n");
 }
 
-int listening(char *bind_addr, int port)
-{
-    struct sockaddr_in server;
-    bzero(&server, sizeof(server));
-    int server_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (server_fd < 0)
-    {
-        logging("listening", "create socket fail!");
-        exit(EXIT_FAILURE);
-    }
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = inet_addr(bind_addr);
-    server.sin_port = htons(port);
-    if (bind(server_fd, (struct sockaddr *)&server, sizeof(server)))
-    {
-        logging("error", "udp bind() failed %s", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-    else
-    {
-        logging("listening", "udp bind to :%d", port);
-    }
-    return server_fd;
-}
-
 int open_fifo(char *ip_addr, int port, char rw)
 {
     int fifo_fd;
@@ -133,9 +108,12 @@ int read_fifo(int fifo_fd, action_t *action)
                 buf[i] = '\0';
             }
         }
-        if (buf) strcpy(action->act, buf);
-        if (conv) strcpy(action->conv, conv);
-        if (key) strcpy(action->key, key);
+        if (action) 
+        {
+            strcpy(action->act, buf);
+            if (conv) strcpy(action->conv, conv);
+            if (key) strcpy(action->key, key);
+        }
         logging("read_fifo", "action: %s, conv:%s, key:%s", action->act, action->conv, action->key);
         return true;
     }
@@ -150,7 +128,7 @@ void start_conv(action_t *action)
     if (ht_exists(conv_session_map, action->conv, length(action->conv)) == 0)
     {
         int dev_fd = init_tap(atoi(action->conv));
-        kcpsess_t *kcps = init_kcpsess(atoi(action->conv), dev_fd, action->key, -1);    //SERVER DONT NEED sock_fd
+        kcpsess_t *kcps = init_kcpsess(atoi(action->conv), dev_fd, action->key);
         //sigaddset(&kcps->dev2kcpm_sigset, SIGRTMIN + 1);
         //sigaddset(&kcps->kcp2devm_sigset, SIGRTMIN);
         start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
@@ -321,7 +299,7 @@ int main(int argc, char *argv[])
     int cnt = 0;
     while (mPtr != NULL) {
         cnt++;
-        int sock_fd = listening(mPtr, server_port);
+        int sock_fd = binding(mPtr, server_port);
         server_listen_t *server = malloc(sizeof(server_listen_t));
         bzero(server, sizeof(server_listen_t));
         server->sock_fd = sock_fd;
