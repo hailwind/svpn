@@ -5,8 +5,6 @@ void print_help() {
     exit(0);
 }
 
-
-
 void start_conv(int dev_fd, int conv, char *c_bind, struct sockaddr_in *dst, char *key)
 {
     kcpsess_t *kcps = init_kcpsess(conv, dev_fd, key);
@@ -37,9 +35,7 @@ void start_conv(int dev_fd, int conv, char *c_bind, struct sockaddr_in *dst, cha
         mPtr = strtok(NULL, ",");
     }
     //sigaddset(&kcps->readudp_sigset, SIGRTMIN);
-    start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
     start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
-    start_thread(&kcps->kcp2devdt, "kcp2devd", kcp2devd, (void *)kcps);
     start_thread(&kcps->dev2kcpt, "dev2kcp", dev2kcp, (void *)kcps);
     kcpupdate_client(kcps);
 }
@@ -67,6 +63,8 @@ int main(int argc, char *argv[]) {
     init_ulimit();
 
     logging("notice", "Client Starting.");
+
+#ifdef WITH_MCRYPT
     if (signal(SIGUSR1, usr_signal) == SIG_ERR || signal(SIGUSR2, usr_signal) == SIG_ERR)
     {
         logging("warning", "Failed to register USR signal");
@@ -75,6 +73,7 @@ int main(int argc, char *argv[]) {
     {
         logging("warning", "Failed to register exit signal");
     }
+#endif
 
     char *c_bind=DEFAULT_ADDRESS_ANY;
     char *server_addr=NULL;
@@ -87,8 +86,13 @@ int main(int argc, char *argv[]) {
     int debug=false; 
     int recombine=true; //frame re recombine
     int crypt=true; 
-    char *crypt_algo=MCRYPT_TWOFISH; 
-    char *crypt_mode=MCRYPT_CBC;
+
+    char *crypt_algo=NULL;
+    char *crypt_mode=NULL;
+#ifdef WITH_MCRYPT
+    crypt_algo=MCRYPT_TWOFISH; 
+    crypt_mode=MCRYPT_CBC;
+#endif
 
     int conv=0;
     char *key = NULL;

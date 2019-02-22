@@ -10,8 +10,6 @@ struct action_st
 };
 typedef struct action_st action_t;
 
-hashtable_t *conv_session_map;
-
 void print_help()
 {
     printf("\
@@ -123,19 +121,17 @@ int read_fifo(int fifo_fd, action_t *action)
     }
 }
 
-void start_conv(action_t *action)
+void start_conv(action_t *action, kcps_map_t *conv_session_map)
 {
-    if (ht_exists(conv_session_map, action->conv, length(action->conv)) == 0)
+    if (ok_map_get(conv_session_map, action->conv) == 0)
     {
         int dev_fd = init_tap(atoi(action->conv));
         kcpsess_t *kcps = init_kcpsess(atoi(action->conv), dev_fd, action->key);
         //sigaddset(&kcps->dev2kcpm_sigset, SIGRTMIN + 1);
         //sigaddset(&kcps->kcp2devm_sigset, SIGRTMIN);
-        start_thread(&kcps->readdevt, "readdev", readdev, (void *)kcps);
         start_thread(&kcps->kcp2devt, "kcp2dev", kcp2dev, (void *)kcps);
-        start_thread(&kcps->kcp2devdt, "kcp2devd", kcp2devd, (void *)kcps);
         start_thread(&kcps->dev2kcpt, "dev2kcp", dev2kcp, (void *)kcps);
-        ht_set(conv_session_map, action->conv, length(action->conv), kcps, sizeof(kcpsess_t));
+        ok_map_put(conv_session_map, action->conv, kcps);
         logging("notice", "server init_kcpsess conv: %s key: %s kcps: %p", action->conv, action->key, kcps);
     }
     else
@@ -144,30 +140,26 @@ void start_conv(action_t *action)
     }
 }
 
-void stop_conv(action_t *action)
+void stop_conv(action_t *action, kcps_map_t *conv_session_map)
 {
-    if (ht_exists(conv_session_map, action->conv, length(action->conv)) == 1)
+    kcpsess_t *kcps = ok_map_get(conv_session_map, action->conv);
+    if (kcps)
     {
         logging("notice", "stop conv %s", action->conv);
         size_t data_len;
-        kcpsess_t *kcps = (kcpsess_t *)ht_get(conv_session_map, action->conv, length(action->conv), &data_len);
         kcps->dead = 1;
-        stop_thread(kcps->readdevt);
         stop_thread(kcps->kcp2devt);
-        stop_thread(kcps->kcp2devdt);
         stop_thread(kcps->dev2kcpt);
         if (kcps->dev_fd > 0)
             close(kcps->dev_fd);
         if (kcps->kcp)
             ikcp_release(kcps->kcp);
-        void *prev;
-        size_t prev_len;
-        ht_delete(conv_session_map, action->conv, length(action->conv), &prev, &prev_len);
+        ok_map_remove(conv_session_map, action->conv);
         free(kcps);
     }
 }
 
-void wait_conv(char *server_addr, int server_port)
+void wait_conv(char *server_addr, int server_port, kcps_map_t *conv_session_map)
 {
     while (1)
     {
@@ -178,11 +170,11 @@ void wait_conv(char *server_addr, int server_port)
         {
             if (strcmp("ADD", action.act) == 0)
             {
-                start_conv(&action);
+                start_conv(&action, conv_session_map);
             }
             else if (strcmp("DEL", action.act) == 0)
             {
-                stop_conv(&action);
+                stop_conv(&action, conv_session_map);
             }
         }
         close(fifo_fd);
@@ -231,8 +223,12 @@ int main(int argc, char *argv[])
     int recombine=true; //frame re recombine
     int debug=false; 
     int crypt=true; 
-    char *crypt_algo=MCRYPT_TWOFISH; 
-    char *crypt_mode=MCRYPT_CBC;
+    char *crypt_algo=NULL;
+    char *crypt_mode=NULL;
+#ifdef WITH_MCRYPT
+    crypt_algo=MCRYPT_TWOFISH; 
+    crypt_mode=MCRYPT_CBC;
+#endif
     char *cmd = NULL;
     char *conv = NULL;
     char *key = NULL;
@@ -292,8 +288,9 @@ int main(int argc, char *argv[])
     }
     init_server_config(server_addr, server_port);
     print_params();
-
-    conv_session_map = ht_create(MAX_CONVS, 0, NULL);
+    
+    kcps_map_t conv_session_map;
+    ok_map_init(&conv_session_map);
     char *mPtr = NULL;
     mPtr = strtok(server_addr, ",");
     int cnt = 0;
@@ -303,13 +300,13 @@ int main(int argc, char *argv[])
         server_listen_t *server = malloc(sizeof(server_listen_t));
         bzero(server, sizeof(server_listen_t));
         server->sock_fd = sock_fd;
-        server->conn_map = conv_session_map;
+        server->conn_map = &conv_session_map;
         char temp[64];
         sprintf(temp, "readudp%d", cnt);
         start_thread(&server->readudpt, temp, readudp_server, (void *)server);
         mPtr = strtok(NULL, ",");
     }
     pthread_t kcpupdatet;
-    start_thread(&kcpupdatet, "kcpupdate", kcpupdate_server, (void *)conv_session_map);
-    wait_conv(server_addr, server_port);
+    start_thread(&kcpupdatet, "kcpupdate", kcpupdate_server, (void *)&conv_session_map);
+    wait_conv(server_addr, server_port, &conv_session_map);
 }

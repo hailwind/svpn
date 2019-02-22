@@ -13,8 +13,11 @@
 #include <signal.h>
 #include <netdb.h>
 #include <pthread.h>
+
+#ifdef WITH_MCRYPT
 #include <mcrypt.h>
 #include <lz4.h>
+#endif
 
 #include <arpa/inet.h>
 #include <sys/time.h>
@@ -31,9 +34,7 @@
 #include <linux/if_tun.h>
 
 #include "lib/ikcp.h"
-#include "lib/rqueue.h"
-#include "lib/hashtable.h"
-#include "lib/rbtree.h"
+#include "lib/ok_lib.h"
 
 #ifndef _SVPN_COMMON_
 #define ENABLED_LOG {"notice", "warning", "error", "init_tap", "init_mcrypt"}
@@ -41,7 +42,7 @@
 #define DEFAULT_SERVER_PORT 8888
 
 #define SND_WINDOW 16384
-#define RSV_WINDOW 16384
+#define RCV_WINDOW 16384
 
 #define MTU 1400
 #define RCV_BUFF_LEN 16384
@@ -68,6 +69,7 @@
 #define length(c) strlen(c)+1
 #endif
 
+#ifdef WITH_MCRYPT
 struct _mcrypt_st
 {
     MCRYPT td;
@@ -76,6 +78,7 @@ struct _mcrypt_st
     int enc_state_size;
 };
 typedef struct _mcrypt_st mcrypt_t;
+#endif
 
 struct _frame_st
 {
@@ -112,16 +115,8 @@ struct _kcpsess_st
 
     pthread_mutex_t ikcp_mutex;
 
-    pthread_t readdevt;
-    pthread_t readkcpt;
-
     pthread_t kcp2devt;
-    pthread_t kcp2devdt;
-    rqueue_t *kcp2dev_queue;
-    //sigset_t kcp2dev_sigset;
-
     pthread_t dev2kcpt;
-    rqueue_t *dev2kcp_queue;
 };
 typedef struct _kcpsess_st kcpsess_t;
 
@@ -132,11 +127,12 @@ struct _client_kcps_st
 };
 typedef struct _client_kcps_st client_kcps_t;
 
+typedef struct ok_map_of(const char *, kcpsess_t *) kcps_map_t;
 struct _server_listen_st
 {
 	int sock_fd;
     pthread_t readudpt;
-	hashtable_t *conn_map;
+	kcps_map_t *conn_map;
 };
 typedef struct _server_listen_st server_listen_t;
 
@@ -180,17 +176,9 @@ void *readudp_client(void *data);
 
 void *readudp_server(void *data);
 
-void *readkcp(void *data);
-
 void *kcp2dev(void *data);
 
-void *kcp2devd(void *data);
-
-void *readdev(void *data);
-
 void *dev2kcp(void *data);
-
-//void *dev2kcpm(void *data);
 
 void kcpupdate_client(kcpsess_t *kcps);
 

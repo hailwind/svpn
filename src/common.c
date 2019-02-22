@@ -9,8 +9,10 @@
 #define M_LABEL 0x90ABCDEF
 #endif
 
-static hashtable_t *thread_table;
-static rbt_t *log_table;
+typedef struct ok_map_of(const char *, char *) str_map_t;
+
+static str_map_t *thread_map;
+static str_map_t *log_table;
 static int fifo_fd;
 static int debug = false;
 
@@ -43,12 +45,13 @@ void _init_logging()
 {
     char arr[TABLE_SIZE][KV_LEN] = ENABLED_LOG;
     int i = 0;
-    log_table = rbt_create(libhl_cmp_keys_int16, free);
+    log_table = malloc(sizeof(str_map_t));
+    ok_map_init(log_table);
     for (i = 0; i < TABLE_SIZE; i++)
     {
         if (length(arr[i]) > 0)
         {
-            rbt_add(log_table, arr[i], length(arr[i]), NULL);
+            ok_map_put(log_table, arr[i], arr[i]);
         }
     }
 }
@@ -59,8 +62,7 @@ int _enabled_log(char *log_name)
     {
         _init_logging();
     }
-    void *data;
-    if (rbt_find(log_table, log_name, length(log_name), &data) == 0)
+    if (ok_map_get(log_table, log_name))
     {
         return 1;
     }
@@ -72,46 +74,44 @@ int _enabled_log(char *log_name)
 
 void _reg_thread(pthread_t p_tid, char *name)
 {
-    if (thread_table == NULL)
+    if (thread_map == NULL)
     {
-        thread_table = ht_create(TABLE_SIZE, 0, NULL);
+        thread_map = malloc(sizeof(str_map_t));
+        ok_map_init(thread_map);
     }
     char key[KV_LEN];
     bzero(key, KV_LEN);
     sprintf(key, "t_%ld", p_tid);
-    void *data;
-    size_t data_len;
-    ht_set_copy(thread_table, key, length(key), name, length(name), &data, &data_len);
+    ok_map_put(thread_map, key, name);
 }
 
 void _un_reg_thread(pthread_t p_tid)
 {
-    if (thread_table == NULL)
+    if (thread_map == NULL)
     {
-        thread_table = ht_create(TABLE_SIZE, 0, NULL);
+        return;
     }
     char key[KV_LEN];
     bzero(key, KV_LEN);
     sprintf(key, "t_%ld", p_tid);
-    void *prev;
-    size_t prev_len;
-    ht_delete(thread_table, key, length(key), &prev, &prev_len);
+    void *prev = ok_map_get(thread_map, key);
+    ok_map_remove(thread_map, key);
     free(prev);
 }
 
 char *_thread_name(pthread_t p_tid)
 {
-    if (thread_table == NULL)
+    if (thread_map == NULL)
     {
-        thread_table = ht_create(TABLE_SIZE, 0, NULL);
+        return "default";
     }
     char key[KV_LEN];
     bzero(key, KV_LEN);
     sprintf(key, "t_%ld", p_tid);
-    if (ht_exists(thread_table, key, length(key)) == 1)
+
+    void *data = ok_map_get(thread_map, key);
+    if (data)
     {
-        size_t data_len;
-        void *data = ht_get(thread_table, key, length(key), &data_len);
         return (char *)data;
     }
     return "default";
@@ -153,10 +153,12 @@ void init_global_config(int role, int mode, int minrto, int lz4, int recombine, 
     global_main->minrto = minrto;
     global_main->cpu_affinity = cpu_affinity;
 
+#ifdef WITH_MCRYPT
     global_crypt = malloc(sizeof(crypt_t));
     global_crypt->crypt = crypt;
     strcpy(global_crypt->crypt_algo, crypt_algo);
     strcpy(global_crypt->crypt_mode, crypt_mode);
+#endif
     srand(time(NULL));
 }
 
@@ -400,7 +402,7 @@ int init_tap(int conv)
     {
         flags = 0;
     }
-    // fcntl(dev, F_SETFL, flags | O_NONBLOCK);
+    fcntl(dev, F_SETFL, flags | O_NONBLOCK);
     logging("init_tap", "init tap dev success. fd: %d", dev);
     return dev;
 }
@@ -448,7 +450,7 @@ void _init_kcp(kcpsess_t *ps)
         ikcp_nodelay(kcp_, M3_MODE);
         break;
     }
-    ikcp_wndsize(kcp_, SND_WINDOW, RSV_WINDOW);
+    ikcp_wndsize(kcp_, SND_WINDOW, RCV_WINDOW);
     ikcp_setmtu(kcp_, MTU);
 
     kcp_->rx_minrto = global_main->minrto;
@@ -461,6 +463,7 @@ void _init_kcp(kcpsess_t *ps)
     ps->kcp = kcp_;
 }
 
+#ifdef WITH_MCRYPT
 void _init_mcrypt(mcrypt_t *mcrypt, char *key)
 {
     if (global_crypt->crypt == 1)
@@ -491,6 +494,7 @@ void _init_mcrypt(mcrypt_t *mcrypt, char *key)
         mcrypt_enc_get_state(mcrypt->td, mcrypt->enc_state, &mcrypt->enc_state_size);
     }
 }
+#endif
 
 kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
 {
@@ -502,15 +506,12 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
     strcpy(ps->key, key);
     pthread_mutex_t ikcp_mutex = PTHREAD_MUTEX_INITIALIZER;
     ps->ikcp_mutex = ikcp_mutex;
-
-    ps->dev2kcp_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
-    ps->kcp2dev_queue = rqueue_create(16384, RQUEUE_MODE_BLOCKING);
-
     _init_kcp(ps);
     logging("init_kcpsess", "kcps: %p", ps);
     return ps;
 }
 
+#ifdef WITH_MCRYPT
 int _encrypt_encompress(kcpsess_t *kcps, mcrypt_t *en_mcrypt, char *write_udp_buff, int write_udp_buff_len)
 {
     int len = write_udp_buff_len;
@@ -575,6 +576,7 @@ int _decrypt_decompress(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *write_dev_bu
     }
     return len;
 }
+#endif
 
 //	|<------------ 4 bytes ------------>|
 //	+--------+--------+--------+--------+
@@ -748,17 +750,17 @@ int _choose_sock_fd(kcpsess_t *kcps)
     return kcps->binds[idx].sock_fd;
 }
 
-void _direct_write_udp(kcpsess_t *kcps, frame_t *frame)
+void _direct_write_udp(kcpsess_t *kcps, char *frame_buff, int len)
 {
     char buff[RCV_BUFF_LEN];
     int cnt = 0;
     memcpy(buff, &kcps->conv, 4); 
-    memcpy(buff + 4, frame->buff, frame->len);
-    cnt = frame->len + 4;
-    free(frame);
+    memcpy(buff + 4, frame_buff, len);
+    cnt = len + 4;
     int sock_fd = _choose_sock_fd(kcps);
     if (sock_fd==-1)
     {
+        logging("warning", "sock_fd failed.");
         return;
     }
     cnt = sendto(sock_fd, buff, cnt, 0, (struct sockaddr *)&kcps->dst, kcps->dst_len);
@@ -822,156 +824,60 @@ void *readudp_server(void *data)
         {
             continue;
         }
-        if (_is_m_frame(buff + 4) == 1)
-        {
+        if (_is_m_frame(buff + 4) == 1) {
             char conv_str[8];
             bzero(conv_str, 8);
             sprintf(conv_str, "%d", get_conv(buff));
-            if (ht_exists(server_listen->conn_map, conv_str, length(conv_str)) == 0)
-            {
-                logging("notice", "CONV NOT EXISTS or NOT INIT COMPLETED %s", conv_str);
-                continue;
-            }
-            else
-            {
-                size_t node_len;
-                void *node = ht_get(server_listen->conn_map, conv_str, length(conv_str), &node_len);
-                kcpsess_t *kcps = (kcpsess_t *)node;
+            kcpsess_t *kcps = ok_map_get(server_listen->conn_map, conv_str);
+            if (kcps) {
+                _check_kcp_server(kcps, server_listen->sock_fd, &client, client_len, buff);
                 _direct_write_dev(kcps, buff + 4, cnt-4);
+                continue;
+            } else {
+                logging("notice", "CONV NOT EXISTS or NOT INIT COMPLETED %s", conv_str);
                 continue;
             }
         }
         
-        if (cnt < 24) //24(KCP)
-        {
+        if (cnt < 24) { //24(KCP)
             continue;
         }
         char conv_str[8];
         bzero(conv_str, 8);
         sprintf(conv_str, "%d", get_conv(buff));
-        if (ht_exists(server_listen->conn_map, conv_str, length(conv_str)) == 0)
-        {
-            logging("notice", "CONV NOT EXISTS or NOT INIT COMPLETED %s", conv_str);
-            continue;
-        }
-        else
-        {
-            size_t node_len;
-            void *node = ht_get(server_listen->conn_map, conv_str, length(conv_str), &node_len);
-            kcpsess_t *kcps = (kcpsess_t *)node;
+        kcpsess_t *kcps = ok_map_get(server_listen->conn_map, conv_str);
+        if (kcps) {
             logging("readudp_server", "state: %d, cmd %c, conv: %d, sn: %d, una: %d, snd_una %d, rcv_nxt %d, snd_nxt %d, length: %d", kcps->kcp->state, get_cmd(buff), get_conv(buff), get_sn(buff), get_una(buff), kcps->kcp->snd_una, kcps->kcp->rcv_nxt, kcps->kcp->snd_nxt, cnt);
             logging("readudp_server", "recv udp packet: %d addr: %s port: %d", cnt, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port));
             _check_kcp_server(kcps, server_listen->sock_fd, &client, client_len, buff);
-
             pthread_mutex_lock(&kcps->ikcp_mutex);
             int ret = ikcp_input(kcps->kcp, buff, cnt);
             pthread_mutex_unlock(&kcps->ikcp_mutex);
+        }else{
+            logging("notice", "CONV NOT EXISTS or NOT INIT COMPLETED %s", conv_str);
+            continue;
         }
     }
 }
 
-
-/*
-0,1 int16 总帧数
-2,3 int16 帧1的长度
-4,5 int16 帧2的长度
-6,7 int16 帧3的长度
-8,9 int16 帧4的长度
-10,11 int16 帧5的长度
-12,13 int16 帧6的长度
-14,15 int16 帧7的长度
-*/
-// void _en_write_udp(kcpsess_t *kcps, mcrypt_t *en_mcrypt, frame_t *frame)
-// {
-//     char buff[RCV_BUFF_LEN];
-//     int cnt = 0;
-//     if (global_main->recombine == true)
-//     {
-//         uint16_t total_frms = 0;
-//         uint16_t position = 16;
-//         cnt = 16;
-//         total_frms++;
-//         memcpy(buff + total_frms * 2, &frame->len, 2);    // frame length.
-//         memcpy(buff + position, frame->buff, frame->len); // frame content.
-//         position += frame->len;
-//         cnt += frame->len;
-//         free(frame);
-//         memcpy(buff, &total_frms, 2);
-//     }
-//     else
-//     {
-//         memcpy(buff, frame->buff, frame->len);
-//         cnt = frame->len;
-//         free(frame);
-//     }
-//     cnt = _encrypt_encompress(kcps, en_mcrypt, buff, cnt);
-//     if (cnt == -1)
-//     {
-//         logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
-//     }
-//     uint32_t label = M_LABEL;
-//     memcpy(buff + cnt, &label, 4);
-//     pthread_mutex_lock(&kcps->ikcp_mutex);
-//     int y = ikcp_send(kcps->kcp, buff, cnt + 4);
-//     ikcp_flush(kcps->kcp);
-//     pthread_mutex_unlock(&kcps->ikcp_mutex);
-//     logging("_en_write_udp", "ikcp_send: %d", cnt);
-// }
-
-void *readdev(void *data)
-{
-    kcpsess_t *kcps = (kcpsess_t *)data;
-    mcrypt_t en_mcrypt;
-    _init_mcrypt(&en_mcrypt, kcps->key);
-    while (kcps->dead == 0)
-    {
-        frame_t *frame = malloc(sizeof(frame_t));
-        frame->len = read(kcps->dev_fd, frame->buff, RCV_BUFF_LEN);
-        if (frame->len > 0)
-        {
-            logging("readdev", "read tap: %d", frame->len);
-            if (_is_m_frame(frame->buff) == 1)
-            {
-                //_en_write_udp(kcps, &en_mcrypt, frame);
-                _direct_write_udp(kcps, frame);
-            }
-            else
-            {
-                rqueue_write(kcps->dev2kcp_queue, frame);
-            }
-        }
-        else
-        {
-            logging("notice", "read from tap dev faile: %d", frame->len);
-        }
-    }
-    return NULL;
-}
-
-void _de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
+void _de_write_dev(kcpsess_t *kcps, char *buff, int len)
 {
     logging("de_write_dev", "ikcp_recv: %d", len);
-    int cnt = _decrypt_decompress(kcps, de_mcrypt, buff, len);
-    if (cnt == -1)
-    {
-        logging("warning", "faile to decrypt and decompress, r_addr: %s port: %d, len: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), cnt);
-        return;
-    }
     if (global_main->recombine == true)
     {
-        uint16_t total_frms = 0;
-        memcpy(&total_frms, buff, 2);
+        int total_frms = 0;
+        memcpy(&total_frms, buff, 4);
         if (total_frms <= 0 || total_frms > 7)
         {
             logging("warning", "alive frame or illegal data, total_frms: %d, r_addr: %s port: %d", total_frms, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port)); //alive OR illegal
             return;
         }
-        uint16_t position = 16;
-        uint16_t i = 0;
+        int position = 32;
+        int i = 0;
         for (i = 0; i < total_frms; i++)
         {
-            uint16_t frm_size;
-            memcpy(&frm_size, buff + (i + 1) * 2, 2);
+            int frm_size;
+            memcpy(&frm_size, buff + (i + 1) * 4, 4);
             int y = write(kcps->dev_fd, buff + position, frm_size);
             logging("de_write_dev", "write to dev: idx: %d, position: %d, size: %d, wrote: %d", i, position, frm_size, y);
             position += frm_size;
@@ -979,7 +885,7 @@ void _de_write_dev(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *buff, int len)
     }
     else
     {
-        int w = write(kcps->dev_fd, buff, cnt);
+        int w = write(kcps->dev_fd, buff, len);
         logging("de_write_dev", "wrote dev: %d", w);
     }
 }
@@ -993,23 +899,14 @@ int _is_m_packet(char *buff, int len)
 void *kcp2dev(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
-    // if (pthread_sigmask(SIG_BLOCK, &kcps->kcp2dev_sigset, NULL) != 0)
-    // {
-    //     logging("warning", "error to pthread_sigmask writedev_sigset.");
-    // }
+#ifdef WITH_MCRYPT
     mcrypt_t de_mcrypt;
     _init_mcrypt(&de_mcrypt, kcps->key);
+#endif
     int sleep_times;
     char buff[RCV_BUFF_LEN];
     while (kcps->dead == 0)
     {
-        // int sig;
-        // if (sigwait(&kcps->kcp2dev_sigset, &sig) == -1)
-        // {
-        //     logging("warning", "error sigwait.");
-        //     continue;
-        // }
-        // logging("kcp2dev", "receive a writedev_sigset.");
         pthread_mutex_lock(&kcps->ikcp_mutex);
         int cnt = ikcp_recv(kcps->kcp, buff, RCV_BUFF_LEN);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
@@ -1027,40 +924,17 @@ void *kcp2dev(void *data)
         else
         {
             sleep_times = 0;
-            if (_is_m_packet(buff, cnt) == 0)
+#ifdef WITH_MCRYPT
+            cnt = _decrypt_decompress(kcps, &de_mcrypt, buff, cnt);
+            if (cnt == -1)
             {
-                _de_write_dev(kcps, &de_mcrypt, buff, cnt - 4);
+                logging("warning", "faile to decrypt and decompress, r_addr: %s port: %d, len: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), cnt);
             }
-            else
-            {
-                frame_t *packet = malloc(sizeof(frame_t));
-                memcpy(packet->buff, buff, cnt);
-                packet->len = cnt;
-                rqueue_write(kcps->kcp2dev_queue, packet);
-            }
+#endif
+            _de_write_dev(kcps, buff, cnt);
         }
     }
     logging("notice", "writedev thread go to dead, conv: %d", kcps->conv);
-    return NULL;
-}
-
-void *kcp2devd(void *data)
-{
-    kcpsess_t *kcps = (kcpsess_t *)data;
-    mcrypt_t de_mcrypt;
-    _init_mcrypt(&de_mcrypt, kcps->key);
-    while (kcps->dead == 0)
-    {
-        while (rqueue_isempty(kcps->kcp2dev_queue) == 0)
-        {
-            frame_t *packet = (frame_t *)rqueue_read(kcps->kcp2dev_queue);
-            char *buff = packet->buff;
-            int cnt = packet->len;
-            _de_write_dev(kcps, &de_mcrypt, buff, cnt);
-            free(packet);
-        }
-        isleep(5);
-    }
     return NULL;
 }
 
@@ -1078,51 +952,63 @@ void *dev2kcp(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
     char buff[RCV_BUFF_LEN];
+    int buff_cnt = 32;
+    int total_frms = 0;
+
+#ifdef WITH_MCRYPT
     mcrypt_t en_mcrypt;
     _init_mcrypt(&en_mcrypt, kcps->key);
+#endif
+    char frame_buff[RCV_BUFF_LEN];
+    int sleep_times;
     while (kcps->dead == 0)
     {
-        while (rqueue_isempty(kcps->dev2kcp_queue) == 0)
+        int len = read(kcps->dev_fd, frame_buff, RCV_BUFF_LEN);
+        if (len < 0)
         {
-            int cnt = 0;
-            if (global_main->recombine == true)
+            isleep(1);
+            sleep_times++;
+        }else{
+            logging("dev2kcp", "read tap: %u", len);
+            if (_is_m_frame(frame_buff) == 1)
             {
-                uint16_t total_frms = 0;
-                uint16_t position = 16;
-                cnt = 16;
-                while (rqueue_isempty(kcps->dev2kcp_queue) == 0 && total_frms <= 5) // not empty and <= 5 frames.
+                _direct_write_udp(kcps, frame_buff, len);
+                continue;
+            } else {
+                total_frms++;
+                if (global_main->recombine)
                 {
-                    frame_t *frame = (frame_t *)rqueue_read(kcps->dev2kcp_queue);
-                    total_frms++;
-                    memcpy(buff + total_frms * 2, &frame->len, 2);    // frame length.
-                    memcpy(buff + position, frame->buff, frame->len); // frame content.
-                    position += frame->len;
-                    cnt += frame->len;
-                    free(frame);
+                    memcpy(buff + total_frms * 4, &len, 4);    // frame length.
+                    memcpy(buff + buff_cnt, frame_buff, len); // frame content.
+                    memcpy(buff, &total_frms, 4);
+                    buff_cnt += len;
+                }else{
+                    memcpy(buff, frame_buff, len);
+                    buff_cnt = len;
                 }
-                memcpy(buff, &total_frms, 2);
+                logging("dev2kcp", "total_frms: %d, buff_cnt: %d, len: %d", total_frms, buff_cnt, len);
             }
-            else
+        }
+        if ((global_main->recombine && total_frms>=5)
+         || (global_main->recombine && total_frms>=1 && sleep_times>=10)
+         || (!global_main->recombine && total_frms>=1)) {
+#ifdef WITH_MCRYPT
+            buff_cnt = _encrypt_encompress(kcps, &en_mcrypt, buff, buff_cnt);
+            if (buff_cnt == -1)
             {
-                frame_t *frame = (frame_t *)rqueue_read(kcps->dev2kcp_queue);
-                memcpy(buff, frame->buff, frame->len);
-                cnt = frame->len;
-                free(frame);
-            }
-
-            cnt = _encrypt_encompress(kcps, &en_mcrypt, buff, cnt);
-            if (cnt == -1)
-            {
-                logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), cnt);
+                logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), buff_cnt);
                 continue;
             }
+#endif
             pthread_mutex_lock(&kcps->ikcp_mutex);
-            int y = ikcp_send(kcps->kcp, buff, cnt);
+            int y = ikcp_send(kcps->kcp, buff, buff_cnt);
             ikcp_flush(kcps->kcp);
             pthread_mutex_unlock(&kcps->ikcp_mutex);
-            logging("dev2kcp", "ikcp_send: %d", cnt);
+            logging("dev2kcp", "ikcp_send: %d", buff_cnt);
+            total_frms = 0;
+            buff_cnt = 32;
+            sleep_times=0;
         }
-        isleep(1);
     }
     return NULL;
 }
@@ -1165,19 +1051,15 @@ void kcpupdate_client(kcpsess_t *kcps)
     }
 }
 
-int check_item(hashtable_t *table, void *key, size_t klen, void *value, size_t vlen, void *user)
-{
-    _kcpupdate((kcpsess_t *)value);
-    return 1;
-}
-
 void *kcpupdate_server(void *data)
 {
-    hashtable_t *conn_m = (hashtable_t *)data;
+    kcps_map_t *conn_m = (kcps_map_t *)data;
     while (1)
     {
         int check_item_count = 0;
-        ht_foreach_pair(conn_m, check_item, &check_item_count);
+        ok_map_foreach(conn_m, const char *key, kcpsess_t *value) {
+            _kcpupdate(value);
+        }
         isleep(5);
     }
 }
