@@ -2,6 +2,9 @@ svpn: prepare buildlib server client
 
 prepare:
 	if [ ! -d bin ]; then mkdir bin; fi;
+ifndef $(ARCH)
+ARCH=X86
+endif
 ifeq ($(ARCH),X86)
 CC:=/usr/bin/gcc
 SOC_FLAG:=-DWITH_MCRYPT
