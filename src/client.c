@@ -5,19 +5,25 @@ void print_help() {
     exit(0);
 }
 
+
+
 void start_conv(int dev_fd, int conv, char *c_bind, struct sockaddr_in *dst, char *key)
 {
     kcpsess_t *kcps = init_kcpsess(conv, dev_fd, key);
     kcps->dst = *dst;
     kcps->dst_len = sizeof(struct sockaddr_in);
-    
+    char addr_str[128];
+    bzero(addr_str, 128);
+    strcpy(addr_str, c_bind);
     int cnt = 0;
     char *mPtr = NULL;
-    mPtr = strtok(c_bind, ",");
+    mPtr = strtok(addr_str, ",");
     while (mPtr != NULL) {
-        strcpy(kcps->bind_arr[cnt], mPtr);
-        int sock_fd = binding(kcps->bind_arr[cnt], 0);
-        kcps->sock_fd_arr[cnt]=sock_fd;
+        int port = new_socket_port();
+        strcpy(kcps->binds[cnt].bind_addr, mPtr);
+        kcps->binds[cnt].port = port;
+        int sock_fd = binding(kcps->binds[cnt].bind_addr, port);
+        kcps->binds[cnt].sock_fd=sock_fd;
         client_kcps_t *ck = (client_kcps_t *)malloc(sizeof(client_kcps_t));
         ck->idx=cnt;
         ck->kcps=kcps;
@@ -27,7 +33,7 @@ void start_conv(int dev_fd, int conv, char *c_bind, struct sockaddr_in *dst, cha
         pthread_t readudpt;
         start_thread(&readudpt, str, readudp_client, (void *)ck);
         cnt++;
-        kcps->sock_fd_count=cnt;
+        kcps->binds_cnt=cnt;
         mPtr = strtok(NULL, ",");
     }
     //sigaddset(&kcps->readudp_sigset, SIGRTMIN);
@@ -59,7 +65,6 @@ static const struct option long_option[]={
 
 int main(int argc, char *argv[]) {
     init_ulimit();
-    srand( (unsigned)time( NULL ) );
 
     logging("notice", "Client Starting.");
     if (signal(SIGUSR1, usr_signal) == SIG_ERR || signal(SIGUSR2, usr_signal) == SIG_ERR)

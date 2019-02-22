@@ -84,6 +84,14 @@ struct _frame_st
 };
 typedef struct _frame_st frame_t;
 
+struct _binding_st
+{
+    char bind_addr[16];
+    int port;
+    int sock_fd;
+};
+typedef struct _binding_st binding_t;
+
 struct _kcpsess_st
 {
     int dead;
@@ -95,9 +103,8 @@ struct _kcpsess_st
 
     int dev_fd;
 
-    char bind_arr[8][16];
-    int sock_fd_arr[8];
-    int sock_fd_count;
+    binding_t binds[8];
+    int binds_cnt;
 
     int64_t dst_update_time;
     struct sockaddr_in dst;
@@ -158,6 +165,8 @@ void exit_signal(int signo);
 void set_cpu_affinity();
 
 int init_tap(int conv);
+
+int new_socket_port();
 
 int binding(char *bind_addr, int port);
 

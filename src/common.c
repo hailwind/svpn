@@ -646,11 +646,11 @@ int _check_kcp_client(kcpsess_t *kcps, char *buff)
 
 void _check_kcp_server(kcpsess_t *kcps, int sock_fd, struct sockaddr_in *client, socklen_t client_len, char *buff)
 {
-    if (kcps->sock_fd_arr[0] == 0)
+    if (kcps->binds[0].sock_fd == 0)
     {
         logging("notice", "sock_fd is not initial, set kcps->sock_fd : %d", sock_fd);
-        kcps->sock_fd_arr[0] = sock_fd;
-        kcps->sock_fd_count=1;
+        kcps->binds[0].sock_fd = sock_fd;
+        kcps->binds_cnt=1;
     }
     int64_t curr = timestamp();
     if ((curr-kcps->dst_update_time)>500) {
@@ -669,6 +669,10 @@ void _check_kcp_server(kcpsess_t *kcps, int sock_fd, struct sockaddr_in *client,
         _init_kcp(kcps);
         pthread_mutex_unlock(&kcps->ikcp_mutex);
     }
+}
+int new_socket_port()
+{
+    return rand()%(50000-45000+1)+45000;
 }
 
 int binding(char *bind_addr, int port)
@@ -698,10 +702,13 @@ int binding(char *bind_addr, int port)
 
 void _renew_socket(kcpsess_t *kcps, int idx)
 {
-    int sock_fd = binding(kcps->bind_arr[idx], 0);
-    close(kcps->sock_fd_arr[idx]);
-    kcps->sock_fd_arr[idx] = sock_fd;
-    logging("notice", "renew socket, sock_fd: %d", kcps->sock_fd_arr[idx]);
+    int orig_sock_fd = kcps->binds[idx].sock_fd;
+    close(orig_sock_fd);
+    int port = new_socket_port();
+    kcps->binds[idx].port = port;
+    int sock_fd = binding(kcps->binds[idx].bind_addr, port);
+    kcps->binds[idx].sock_fd = sock_fd;
+    logging("notice", "renew socket, sock_fd: %d", sock_fd);
 }
 
 int _is_m_frame(char *buff)
@@ -730,15 +737,15 @@ int _is_m_frame(char *buff)
 
 int _choose_sock_fd(kcpsess_t *kcps)
 {
-    if (kcps->sock_fd_count<=0)
+    if (kcps->binds_cnt<=0)
     {
         return -1;
     }
-    if (kcps->sock_fd_count==1) {
-        return kcps->sock_fd_arr[0];
+    if (kcps->binds_cnt==1) {
+        return kcps->binds[0].sock_fd;
     }
-    int idx = rand() % kcps->sock_fd_count;
-    return kcps->sock_fd_arr[idx];
+    int idx = rand() % kcps->binds_cnt;
+    return kcps->binds[idx].sock_fd;
 }
 
 void _direct_write_udp(kcpsess_t *kcps, frame_t *frame)
@@ -775,7 +782,7 @@ void *readudp_client(void *data)
     char buff[RCV_BUFF_LEN];
     while (kcps->dead == 0)
     {
-        int cnt = recvfrom(kcps->sock_fd_arr[c_kcps->idx], buff, RCV_BUFF_LEN, 0, (struct sockaddr *)&kcps->dst, &(kcps->dst_len));
+        int cnt = recvfrom(kcps->binds[c_kcps->idx].sock_fd, buff, RCV_BUFF_LEN, 0, (struct sockaddr *)&kcps->dst, &(kcps->dst_len));
         if (cnt < 0)
         {
             continue;
