@@ -153,9 +153,9 @@ void init_global_config(int role, int mode, int minrto, int lz4, int recombine, 
     global_main->minrto = minrto;
     global_main->cpu_affinity = cpu_affinity;
 
-#ifdef WITH_MCRYPT
     global_crypt = malloc(sizeof(crypt_t));
     global_crypt->crypt = crypt;
+#ifdef WITH_MCRYPT
     strcpy(global_crypt->crypt_algo, crypt_algo);
     strcpy(global_crypt->crypt_mode, crypt_mode);
 #endif
@@ -206,8 +206,10 @@ void print_params()
     printf("Address           : %s\n", global_main->address);
     printf("Port              : %d\n", global_main->port);
     printf("Crypt             : %s\n", global_crypt->crypt == 1 ? "true" : "false");
+#ifdef WITH_MCRYPT
     printf("Crypt Algo        : %s\n", global_crypt->crypt_algo);
     printf("Crypt Mode        : %s\n", global_crypt->crypt_mode);
+#endif
     printf("<<<<<<<<<<<<<<<<<<<parameters===================\n");
 }
 /*
@@ -503,7 +505,9 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
     ps->dev_fd = dev_fd;
     ps->conv = conv;
     ps->dead = 0;
+#ifdef WITH_MCRYPT
     strcpy(ps->key, key);
+#endif
     pthread_mutex_t ikcp_mutex = PTHREAD_MUTEX_INITIALIZER;
     ps->ikcp_mutex = ikcp_mutex;
     _init_kcp(ps);

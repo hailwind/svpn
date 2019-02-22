@@ -139,10 +139,12 @@ int main(int argc, char *argv[]) {
         print_help();
         exit(1);
     }
+#ifdef WITH_MCRYPT
     if(!key && strlen(key)<16 && strlen(key)>32) {
         logging("notice", "no key input or key too long, the length must be between 16 and 32");
         exit(1);
     }
+#endif
     init_global_config(role, mode, minrto, lz4, recombine, debug, \
         crypt, crypt_algo, crypt_mode, cpu_affinity);
     init_server_config(server_addr, server_port);
@@ -155,7 +157,7 @@ int main(int argc, char *argv[]) {
     ser_addr.sin_family = AF_INET;
     ser_addr.sin_addr.s_addr = inet_addr(server_addr);
     ser_addr.sin_port = htons(server_port);
-    logging("notice", "open server_addr: %s, server_port: %d, key: %s", server_addr, server_port, key);
+    logging("notice", "open server_addr: %s, server_port: %d", server_addr, server_port);
 
     start_conv(dev_fd, conv, c_bind, &ser_addr, key);
 }
