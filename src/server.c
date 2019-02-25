@@ -66,11 +66,13 @@ void send_fifo(int fifo_fd, char *cmd, char *conv, char *key)
     }
     else
     {
+#ifdef WITH_MCRYPT
         if (strcmp("ADD", cmd)==0) {
             logging("notice", "no key input or key too long, the length must be between 16 and 32");
             print_help();
             exit(1);
         }
+#endif
     }
     strcat(buf, "\n");
     int cnt = write(fifo_fd, buf, length(buf));

@@ -968,7 +968,7 @@ void *dev2kcp(void *data)
     while (kcps->dead == 0)
     {
         int len = read(kcps->dev_fd, frame_buff, RCV_BUFF_LEN);
-        if (len < 0)
+        if (len <= 0)
         {
             isleep(1);
             sleep_times++;

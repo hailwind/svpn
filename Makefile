@@ -9,6 +9,7 @@ ifeq ($(ARCH),X86)
 CC:=/usr/bin/gcc
 SOC_FLAG:=-DWITH_MCRYPT
 else
+export STAGING_DIR=/home/alexw/workspace/openwrt-sdk-18.06.2-ramips-mt7620_gcc-7.3.0_musl.Linux-x86_64/staging_dir/
 CC := /home/alexw/workspace/openwrt-sdk-18.06.2-ramips-mt7620_gcc-7.3.0_musl.Linux-x86_64/staging_dir/toolchain-mipsel_24kc_gcc-7.3.0_musl/bin/mipsel-openwrt-linux-gcc
 SOC_FLAG := -DNO_MCRYPT
 endif
@@ -16,16 +17,16 @@ endif
 
 server: common.o server.o
 ifeq ($(ARCH),X86)
-	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/server
+	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server
 else
-	$(CC) -g -rdynamic -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/server
+	$(CC) -g -rdynamic -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server_mips
 endif
 
 client: common.o client.o
 ifeq ($(ARCH),X86)
-	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/client.o bin/common.o bin/ikcp.o -o bin/client
+	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/client.o bin/common.o bin/ikcp.o -o bin/svpn_client_x86
 else
-	$(CC) -g -rdynamic -lpthread bin/client.o bin/common.o bin/ikcp.o -o bin/client
+	$(CC) -g -rdynamic -lpthread bin/client.o bin/common.o bin/ikcp.o -o bin/svpn_client_mips
 endif
 server.o: 
 	$(CC) $(CFLAGS) -g -rdynamic -c src/server.c -o bin/server.o
