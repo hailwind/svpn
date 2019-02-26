@@ -64,7 +64,6 @@ int main(int argc, char *argv[]) {
 
     logging("notice", "Client Starting.");
 
-#ifdef WITH_MCRYPT
     if (signal(SIGUSR1, usr_signal) == SIG_ERR || signal(SIGUSR2, usr_signal) == SIG_ERR)
     {
         logging("warning", "Failed to register USR signal");
@@ -73,7 +72,6 @@ int main(int argc, char *argv[]) {
     {
         logging("warning", "Failed to register exit signal");
     }
-#endif
 
     char *c_bind=DEFAULT_ADDRESS_ANY;
     char *server_addr=NULL;
@@ -89,10 +87,8 @@ int main(int argc, char *argv[]) {
 
     char *crypt_algo=NULL;
     char *crypt_mode=NULL;
-#ifdef WITH_MCRYPT
     crypt_algo=MCRYPT_TWOFISH; 
     crypt_mode=MCRYPT_CBC;
-#endif
 
     int conv=0;
     char *key = NULL;
@@ -139,12 +135,12 @@ int main(int argc, char *argv[]) {
         print_help();
         exit(1);
     }
-#ifdef WITH_MCRYPT
-    if(!key && strlen(key)<16 && strlen(key)>32) {
-        logging("notice", "no key input or key too long, the length must be between 16 and 32");
-        exit(1);
+    if(crypt==true) {
+        if (key==NULL || strlen(key)<16 || strlen(key)>32) {
+            logging("error", "no key input or key too long, the length must be between 16 and 32");
+            exit(1);
+        }
     }
-#endif
     init_global_config(role, mode, minrto, lz4, recombine, debug, \
         crypt, crypt_algo, crypt_mode, cpu_affinity);
     init_server_config(server_addr, server_port);

@@ -126,7 +126,7 @@ void _create_pid(char *role, char *ipaddr, int id)
     sprintf(f_name, PID_PATH, role, ipaddr, id);
     if ((pid_fd = fopen(f_name, "wt+")) == NULL)
     {
-        logging("notice", "create pid file: %s fd: %d failed.", f_name, pid_fd);
+        logging("error", "create pid file: %s fd: %d failed.", f_name, pid_fd);
         exit(1);
     }
     fprintf(pid_fd, "%d", global_main->pid);
@@ -155,10 +155,8 @@ void init_global_config(int role, int mode, int minrto, int lz4, int recombine, 
 
     global_crypt = malloc(sizeof(crypt_t));
     global_crypt->crypt = crypt;
-#ifdef WITH_MCRYPT
     strcpy(global_crypt->crypt_algo, crypt_algo);
     strcpy(global_crypt->crypt_mode, crypt_mode);
-#endif
     srand(time(NULL));
 }
 
@@ -206,10 +204,8 @@ void print_params()
     printf("Address           : %s\n", global_main->address);
     printf("Port              : %d\n", global_main->port);
     printf("Crypt             : %s\n", global_crypt->crypt == 1 ? "true" : "false");
-#ifdef WITH_MCRYPT
     printf("Crypt Algo        : %s\n", global_crypt->crypt_algo);
     printf("Crypt Mode        : %s\n", global_crypt->crypt_mode);
-#endif
     printf("<<<<<<<<<<<<<<<<<<<parameters===================\n");
 }
 /*
@@ -465,7 +461,6 @@ void _init_kcp(kcpsess_t *ps)
     ps->kcp = kcp_;
 }
 
-#ifdef WITH_MCRYPT
 void _init_mcrypt(mcrypt_t *mcrypt, char *key)
 {
     if (global_crypt->crypt == 1)
@@ -496,7 +491,6 @@ void _init_mcrypt(mcrypt_t *mcrypt, char *key)
         mcrypt_enc_get_state(mcrypt->td, mcrypt->enc_state, &mcrypt->enc_state_size);
     }
 }
-#endif
 
 kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
 {
@@ -505,9 +499,7 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
     ps->dev_fd = dev_fd;
     ps->conv = conv;
     ps->dead = 0;
-#ifdef WITH_MCRYPT
     strcpy(ps->key, key);
-#endif
     pthread_mutex_t ikcp_mutex = PTHREAD_MUTEX_INITIALIZER;
     ps->ikcp_mutex = ikcp_mutex;
     _init_kcp(ps);
@@ -515,7 +507,6 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
     return ps;
 }
 
-#ifdef WITH_MCRYPT
 int _encrypt_encompress(kcpsess_t *kcps, mcrypt_t *en_mcrypt, char *write_udp_buff, int write_udp_buff_len)
 {
     int len = write_udp_buff_len;
@@ -580,7 +571,6 @@ int _decrypt_decompress(kcpsess_t *kcps, mcrypt_t *de_mcrypt, char *write_dev_bu
     }
     return len;
 }
-#endif
 
 //	|<------------ 4 bytes ------------>|
 //	+--------+--------+--------+--------+
@@ -903,10 +893,8 @@ int _is_m_packet(char *buff, int len)
 void *kcp2dev(void *data)
 {
     kcpsess_t *kcps = (kcpsess_t *)data;
-#ifdef WITH_MCRYPT
     mcrypt_t de_mcrypt;
     _init_mcrypt(&de_mcrypt, kcps->key);
-#endif
     int sleep_times;
     char buff[RCV_BUFF_LEN];
     while (kcps->dead == 0)
@@ -928,13 +916,11 @@ void *kcp2dev(void *data)
         else
         {
             sleep_times = 0;
-#ifdef WITH_MCRYPT
             cnt = _decrypt_decompress(kcps, &de_mcrypt, buff, cnt);
             if (cnt == -1)
             {
                 logging("warning", "faile to decrypt and decompress, r_addr: %s port: %d, len: %d", inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port), cnt);
             }
-#endif
             _de_write_dev(kcps, buff, cnt);
         }
     }
@@ -959,10 +945,8 @@ void *dev2kcp(void *data)
     int buff_cnt = 32;
     int total_frms = 0;
 
-#ifdef WITH_MCRYPT
     mcrypt_t en_mcrypt;
     _init_mcrypt(&en_mcrypt, kcps->key);
-#endif
     char frame_buff[RCV_BUFF_LEN];
     int sleep_times;
     while (kcps->dead == 0)
@@ -996,14 +980,12 @@ void *dev2kcp(void *data)
         if ((global_main->recombine && total_frms>=5)
          || (global_main->recombine && total_frms>=1 && sleep_times>=10)
          || (!global_main->recombine && total_frms>=1)) {
-#ifdef WITH_MCRYPT
             buff_cnt = _encrypt_encompress(kcps, &en_mcrypt, buff, buff_cnt);
             if (buff_cnt == -1)
             {
                 logging("warning", "faile to decrypt and decompress, r_addr: %s len: %d", inet_ntoa(kcps->dst.sin_addr), buff_cnt);
                 continue;
             }
-#endif
             pthread_mutex_lock(&kcps->ikcp_mutex);
             int y = ikcp_send(kcps->kcp, buff, buff_cnt);
             ikcp_flush(kcps->kcp);

@@ -14,10 +14,8 @@
 #include <netdb.h>
 #include <pthread.h>
 
-#ifdef WITH_MCRYPT
 #include <mcrypt.h>
 #include <lz4.h>
-#endif
 
 #include <arpa/inet.h>
 #include <sys/time.h>
@@ -69,7 +67,6 @@
 #define length(c) strlen(c)+1
 #endif
 
-#ifdef WITH_MCRYPT
 struct _mcrypt_st
 {
     MCRYPT td;
@@ -78,7 +75,6 @@ struct _mcrypt_st
     int enc_state_size;
 };
 typedef struct _mcrypt_st mcrypt_t;
-#endif
 
 struct _frame_st
 {

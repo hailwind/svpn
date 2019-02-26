@@ -3,31 +3,22 @@ svpn: prepare buildlib server client
 prepare:
 	if [ ! -d bin ]; then mkdir bin; fi;
 ifndef $(ARCH)
-ARCH=X86
+ARCH=x86
 endif
-ifeq ($(ARCH),X86)
+ifeq ($(ARCH),x86)
 CC:=/usr/bin/gcc
-SOC_FLAG:=-DWITH_MCRYPT
 else
-export STAGING_DIR=/home/alexw/workspace/openwrt-sdk-18.06.2-ramips-mt7620_gcc-7.3.0_musl.Linux-x86_64/staging_dir/
-CC := /home/alexw/workspace/openwrt-sdk-18.06.2-ramips-mt7620_gcc-7.3.0_musl.Linux-x86_64/staging_dir/toolchain-mipsel_24kc_gcc-7.3.0_musl/bin/mipsel-openwrt-linux-gcc
-SOC_FLAG := -DNO_MCRYPT
+export STAGING_DIR=/home/alexw/workspace/openwrt/staging_dir/target-mipsel_24kc_musl
+CC := /home/alexw/workspace/openwrt/staging_dir/toolchain-mipsel_24kc_gcc-7.4.0_musl/bin/mipsel-openwrt-linux-gcc
 endif
-	CFLAGS += $(SOC_FLAG)
 
 server: common.o server.o
-ifeq ($(ARCH),X86)
-	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server_x86
-else
-	$(CC) -g -rdynamic -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server_mips
-endif
+	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server_$(ARCH)
+
 
 client: common.o client.o
-ifeq ($(ARCH),X86)
-	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/client.o bin/common.o bin/ikcp.o -o bin/svpn_client_x86
-else
-	$(CC) -g -rdynamic -lpthread bin/client.o bin/common.o bin/ikcp.o -o bin/svpn_client_mips
-endif
+	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/client.o bin/common.o bin/ikcp.o -o bin/svpn_client_$(ARCH)
+
 server.o: 
 	$(CC) $(CFLAGS) -g -rdynamic -c src/server.c -o bin/server.o
 
