@@ -1,7 +1,7 @@
 #include "common.h"
 
 void print_help() {
-    printf("client [--cbind=192.168.10.2,192.168.10.3] --server=192.168.1.1 [--port=8888] --conv=28445 [--with-lz4] [--no-recombine] [--no-crypt] --crypt-key=0123456789012345678901234567890 [--crypt-algo=twofish] [--crypt-mode=cbc] [--mode=3] [--minrto=20] [--debug]\n");
+    printf("client [--cbind=192.168.10.2,192.168.10.3] --server=192.168.1.1 [--port=8888] --conv=28445 [--with-lz4] [--no-recombine] [--no-crypt] --crypt-key=0123456789012345678901234567890 [--crypt-algo=twofish] [--crypt-mode=cbc] [--mode=c] [--mode-params=0,40,2,1] [--minrto=20] [--debug]\n");
     exit(0);
 }
 
@@ -53,6 +53,7 @@ static const struct option long_option[]={
     {"crypt-algo",required_argument,NULL,'A'},
     {"crypt-mode",required_argument,NULL,'M'},
     {"mode",required_argument,NULL,'m'}, 
+    {"mode-params",required_argument,NULL,'P'},
     {"minrto", required_argument, NULL, 'r'},
     {"debug",no_argument,NULL,'d'},
     {"help",no_argument,NULL,'h'},
@@ -77,7 +78,8 @@ int main(int argc, char *argv[]) {
     char *server_addr=NULL;
     int server_port = DEFAULT_SERVER_PORT;
     int role=CLIENT; 
-    int mode=3;
+    char mode='d';
+    char *mode_params=NULL;
     int minrto=RX_MINRTO;
     int cpu_affinity = 0;
     int lz4=false; 
@@ -115,12 +117,14 @@ int main(int argc, char *argv[]) {
                 crypt=false; break;
             case 'k':
                 key=optarg; break;
-            case 'A': 
+            case 'A':
                 crypt_algo = optarg; break;
-            case 'M': 
+            case 'M':
                 crypt_mode = optarg; break;
-            case 'm': 
-                mode = atoi(optarg); break;
+            case 'm':
+                mode = optarg[0]; break;
+            case 'P':
+                mode_params = optarg; break;
             case 'r':
                 minrto = atoi(optarg); break;
             case 'a':
@@ -141,7 +145,7 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     }
-    init_global_config(role, mode, minrto, lz4, recombine, debug, \
+    init_global_config(role, mode, mode_params, minrto, lz4, recombine, debug, \
         crypt, crypt_algo, crypt_mode, cpu_affinity);
     init_server_config(server_addr, server_port);
     print_params();

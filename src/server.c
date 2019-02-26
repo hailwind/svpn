@@ -14,7 +14,7 @@ void print_help()
 {
     printf("\
 //start a server process.\n\
-server --bind=192.168.1.2 [--port=8888] [--mode=3] [--minrto=20] [--with-lz4] [--no-recombine] [--no-crypt]  [--crypt-algo=twofish] [--crypt-mode=cbc] [--debug]\n\
+server --bind=192.168.1.2 [--port=8888] [--mode=c] [--mode-params=0,40,2,1] [--minrto=20] [--with-lz4] [--no-recombine] [--no-crypt]  [--crypt-algo=twofish] [--crypt-mode=cbc] [--debug]\n\
 //add a conv to a server, identify the server by ipaddr and port. \n\
 server --bind=192.168.1.2 [--port=8888] --add-conv=28445 --crypt-key=0123456789012345678901234567890\n\
 //del a conv from a server, identify the server by ipaddr and port. \n\
@@ -192,6 +192,7 @@ struct option long_option[] = {
     {"crypt-algo", required_argument, NULL, 'A'},
     {"crypt-mode", required_argument, NULL, 'M'},
     {"mode", required_argument, NULL, 'm'},
+    {"mode-params",required_argument,NULL,'P'},
     {"minrto", required_argument, NULL, 'r'},
     {"del", required_argument, NULL, 'X'},
     {"add", required_argument, NULL, 'Y'},
@@ -216,7 +217,8 @@ int main(int argc, char *argv[])
     char *server_addr=NULL;
     int server_port = DEFAULT_SERVER_PORT;
     int role=SERVER; 
-    int mode=3;
+    char mode='d';
+    char *mode_params=NULL;
     int minrto=RX_MINRTO;
     int cpu_affinity = 0;
     int lz4=false; 
@@ -256,7 +258,9 @@ int main(int argc, char *argv[])
         case 'M':
             crypt_mode = optarg; break;
         case 'm':
-            mode = atoi(optarg); break;
+            mode = optarg[0]; break;
+        case 'P':
+            mode_params = optarg; break;
         case 'r':
             minrto = atoi(optarg); break;
         case 'a':
@@ -276,7 +280,7 @@ int main(int argc, char *argv[])
         print_help();
         exit(1);
     }
-    init_global_config(role, mode, minrto, lz4, recombine, debug, \
+    init_global_config(role, mode, mode_params, minrto, lz4, recombine, debug, \
         crypt, crypt_algo, crypt_mode, cpu_affinity);
     if (cmd && conv)
     {

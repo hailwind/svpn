@@ -48,15 +48,12 @@
 
 //IKCP PARAMETERS DEFINE
 //int nodelay, int interval, int resend, int nc
-#define M0_MODE 0, 1, 20, 0
-#define M1_MODE 0, 2, 50, 0
-#define M2_MODE 0, 2, 20, 0
-#define M3_MODE 0, 2, 10, 0
-#define M4_MODE 0, 2, 5, 0
-#define M5_MODE 0, 2, 50, 1
-#define M6_MODE 0, 2, 20, 1
-#define M7_MODE 0, 2, 10, 1
-#define M8_MODE 0, 2, 5, 1
+
+#define MD_MODE "0,40,0,0"
+#define M1_MODE "0,40,2,1"
+#define M2_MODE "0,30,2,1"
+#define M3_MODE "1,20,2,1"
+#define M4_MODE "1,10,2,1"
 
 #define SERVER 1
 #define CLIENT 2
@@ -136,7 +133,7 @@ void print_params();
 
 void init_ulimit();
 
-void init_global_config(int role, int mode, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode, int cpu_affinity);
+void init_global_config(int role, char mode, char *mode_params, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode, int cpu_affinity);
 
 void init_server_config(char *server_addr, int server_port);
 

@@ -23,7 +23,8 @@ struct main_st
     int lz4;
     int recombine;
     int role;
-    int mode;
+    char mode;
+    char mode_params[128];
     char address[128];
     int port;
     int minrto;
@@ -141,15 +142,37 @@ void _erase_pid(char *role, char *ipaddr, int id)
     unlink(f_name);
 }
 
-void init_global_config(int role, int mode, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode, int cpu_affinity)
+void init_global_config(int role, char mode, char *mode_params, int minrto, int lz4, int recombine, int debug_param, int crypt, char *crypt_algo, char *crypt_mode, int cpu_affinity)
 {
     debug = debug_param;
-
     global_main = malloc(sizeof(main_t));
     global_main->lz4 = lz4;
     global_main->recombine = recombine;
     global_main->role = role;
     global_main->mode = mode;
+    switch (global_main->mode)
+    {
+    case 'd':
+        strcpy(global_main->mode_params, MD_MODE);
+        break;
+    case '1':
+        strcpy(global_main->mode_params, M1_MODE);
+        break;
+    case '2':
+        strcpy(global_main->mode_params, M2_MODE);
+        break;
+    case '3':
+        strcpy(global_main->mode_params, M3_MODE);
+        break;
+    case '4':
+        strcpy(global_main->mode_params, M4_MODE);
+        break;
+    default:
+        strcpy(global_main->mode_params, MD_MODE);
+        break;
+    }
+    if (mode_params) strcpy(global_main->mode_params, mode_params);
+
     global_main->minrto = minrto;
     global_main->cpu_affinity = cpu_affinity;
 
@@ -197,7 +220,8 @@ void print_params()
 {
     printf("===================parameters>>>>>>>>>>>>>>>>>>>\n");
     printf("Role              : %s\n", global_main->role == SERVER ? "Server" : "Client");
-    printf("KCP Mode          : %d\n", global_main->mode);
+    printf("KCP Mode          : %c\n", global_main->mode);
+    printf("Kcp Params        : %s\n", global_main->mode_params);
     printf("KCP Minrto        : %d\n", global_main->minrto);
     printf("LZ4               : %s\n", global_main->lz4 == 1 ? "true" : "false");
     printf("Recombine         : %s\n", global_main->recombine == 1 ? "true" : "false");
@@ -409,45 +433,37 @@ void _init_kcp(kcpsess_t *ps)
 {
     ikcpcb *kcp_ = ikcp_create(ps->conv, ps);
     logging("init_kcp", "ikcp_create, conv: %d kcps: %p, kcp: %p, buffer: %p", ps->conv, ps, kcp_, kcp_->buffer);
-    int mode = global_main->mode;
+    char mode = global_main->mode;
+    //0, 40, 0, 0
+    int nodelay=0;
+    int interval=40;
+    int resend=0;
+    int nc=0;
+    int i=0;
+    char *mPtr = NULL;
+    mPtr = strtok(global_main->mode_params, ",");
+    while (mPtr != NULL) {
+        if (i==0) {
+            nodelay=atoi(mPtr);
+        }
+        if (i==1) {
+            interval=atoi(mPtr);
+        }
+        if (i==2) {
+            resend=atoi(mPtr);
+        }
+        if (i==3) {
+            nc=atoi(mPtr);
+        }
+        i++;
+        mPtr = strtok(NULL, ",");
+    }
     // 启动快速模式
     // 第二个参数 nodelay-启用以后若干常规加速将启动
     // 第三个参数 interval为内部处理时钟，默认设置为 10ms
     // 第四个参数 resend为快速重传指标，设置为2
-    // 第五个参数 为是否禁用常规流控，这里禁止
-    switch (mode)
-    {
-    case 0:
-        ikcp_nodelay(kcp_, M0_MODE);
-        break;
-    case 1:
-        ikcp_nodelay(kcp_, M1_MODE);
-        break;
-    case 2:
-        ikcp_nodelay(kcp_, M2_MODE);
-        break;
-    case 3:
-        ikcp_nodelay(kcp_, M3_MODE);
-        break;
-    case 4:
-        ikcp_nodelay(kcp_, M4_MODE);
-        break;
-    case 5:
-        ikcp_nodelay(kcp_, M5_MODE);
-        break;
-    case 6:
-        ikcp_nodelay(kcp_, M6_MODE);
-        break;
-    case 7:
-        ikcp_nodelay(kcp_, M7_MODE);
-        break;
-    case 8:
-        ikcp_nodelay(kcp_, M8_MODE);
-        break;
-    default:
-        ikcp_nodelay(kcp_, M3_MODE);
-        break;
-    }
+    // 第五个参数 nc为是否禁用常规流控，这里禁止
+    ikcp_nodelay(kcp_, nodelay, interval, resend, nc);
     ikcp_wndsize(kcp_, SND_WINDOW, RCV_WINDOW);
     ikcp_setmtu(kcp_, MTU);
 
