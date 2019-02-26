@@ -499,7 +499,7 @@ kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
     ps->dev_fd = dev_fd;
     ps->conv = conv;
     ps->dead = 0;
-    strcpy(ps->key, key);
+    if (key) strcpy(ps->key, key);
     pthread_mutex_t ikcp_mutex = PTHREAD_MUTEX_INITIALIZER;
     ps->ikcp_mutex = ikcp_mutex;
     _init_kcp(ps);
