@@ -17,7 +17,7 @@ endif
 
 server: common.o server.o
 ifeq ($(ARCH),X86)
-	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server
+	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server_x86
 else
 	$(CC) -g -rdynamic -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server_mips
 endif

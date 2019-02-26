@@ -16,9 +16,9 @@ void print_help()
 //start a server process.\n\
 server --bind=192.168.1.2 [--port=8888] [--mode=3] [--minrto=20] [--with-lz4] [--no-recombine] [--no-crypt]  [--crypt-algo=twofish] [--crypt-mode=cbc] [--debug]\n\
 //add a conv to a server, identify the server by ipaddr and port. \n\
-server --bind=192.168.1.2 [--port=8888] --add-conv=38837 --crypt-key=0123456789012345678901234567890\n\
+server --bind=192.168.1.2 [--port=8888] --add-conv=28445 --crypt-key=0123456789012345678901234567890\n\
 //del a conv from a server, identify the server by ipaddr and port. \n\
-server --bind=192.168.1.2 [--port=8888] --del-conv=38837\n");
+server --bind=192.168.1.2 [--port=8888] --del-conv=28445\n");
 }
 
 int open_fifo(char *ip_addr, int port, char rw)
