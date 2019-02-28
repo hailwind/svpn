@@ -168,7 +168,7 @@ void init_global_config(int role, char mode, char *mode_params, int minrto, int 
         strcpy(global_main->mode_params, M4_MODE);
         break;
     default:
-        strcpy(global_main->mode_params, MD_MODE);
+        strcpy(global_main->mode_params, M1_MODE);
         break;
     }
     if (mode_params) strcpy(global_main->mode_params, mode_params);
@@ -508,7 +508,7 @@ void _init_mcrypt(mcrypt_t *mcrypt, char *key)
     }
 }
 
-kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key)
+kcpsess_t *init_kcpsess(uint32_t conv, int dev_fd, char *key)
 {
     kcpsess_t *ps = (kcpsess_t *)malloc(sizeof(kcpsess_t));
     bzero(ps, sizeof(kcpsess_t));
@@ -626,9 +626,15 @@ uint32_t get_una(void *buf)
 
 uint32_t get_conv(void *buf)
 {
-    uint32_t conv_id;
-    memcpy(&conv_id, buf, 4);
-    return conv_id;
+    // uint32_t conv_id;
+    // memcpy(&conv_id, buf, 4);
+    // return conv_id;
+
+    return ikcp_getconv(buf);
+}
+
+void set_conv(void *p, uint32_t l) {
+    ikcp_setconv(p, l);
 }
 
 /*
@@ -764,7 +770,8 @@ void _direct_write_udp(kcpsess_t *kcps, char *frame_buff, int len)
 {
     char buff[RCV_BUFF_LEN];
     int cnt = 0;
-    memcpy(buff, &kcps->conv, 4); 
+    set_conv(buff, kcps->conv);
+    // memcpy(buff, &kcps->conv, 4); 
     memcpy(buff + 4, frame_buff, len);
     cnt = len + 4;
     int sock_fd = _choose_sock_fd(kcps);
@@ -875,19 +882,21 @@ void _de_write_dev(kcpsess_t *kcps, char *buff, int len)
     logging("de_write_dev", "ikcp_recv: %d", len);
     if (global_main->recombine == true)
     {
-        int total_frms = 0;
-        memcpy(&total_frms, buff, 4);
+        IUINT32 total_frms = ikcp_get32u(buff);
+        // memcpy(&total_frms, buff, 4);
+        
         if (total_frms <= 0 || total_frms > 7)
         {
             logging("warning", "alive frame or illegal data, total_frms: %d, r_addr: %s port: %d", total_frms, inet_ntoa(kcps->dst.sin_addr), ntohs(kcps->dst.sin_port)); //alive OR illegal
             return;
         }
         int position = 32;
-        int i = 0;
+        uint16_t i = 0;
         for (i = 0; i < total_frms; i++)
         {
-            int frm_size;
-            memcpy(&frm_size, buff + (i + 1) * 4, 4);
+            IUINT32 frm_size = ikcp_get32u(buff + (i + 1) * 4);
+            // memcpy(&frm_size, buff + (i + 1) * 4, 4);
+
             int y = write(kcps->dev_fd, buff + position, frm_size);
             logging("de_write_dev", "write to dev: idx: %d, position: %d, size: %d, wrote: %d", i, position, frm_size, y);
             position += frm_size;
@@ -959,7 +968,7 @@ void *dev2kcp(void *data)
     kcpsess_t *kcps = (kcpsess_t *)data;
     char buff[RCV_BUFF_LEN];
     int buff_cnt = 32;
-    int total_frms = 0;
+    IUINT32 total_frms = 0;
 
     mcrypt_t en_mcrypt;
     _init_mcrypt(&en_mcrypt, kcps->key);
@@ -967,12 +976,13 @@ void *dev2kcp(void *data)
     int sleep_times;
     while (kcps->dead == 0)
     {
-        int len = read(kcps->dev_fd, frame_buff, RCV_BUFF_LEN);
-        if (len <= 0)
+        int cnt = read(kcps->dev_fd, frame_buff, RCV_BUFF_LEN);
+        if (cnt <= 0)
         {
             isleep(1);
             sleep_times++;
         }else{
+            IUINT32 len = cnt;
             logging("dev2kcp", "read tap: %u", len);
             if (_is_m_frame(frame_buff) == 1)
             {
@@ -982,9 +992,11 @@ void *dev2kcp(void *data)
                 total_frms++;
                 if (global_main->recombine)
                 {
-                    memcpy(buff + total_frms * 4, &len, 4);    // frame length.
+                    ikcp_set32u(buff + total_frms * 4, len);
+                    // memcpy(buff + total_frms * 4, &len, 4);    // frame length.
                     memcpy(buff + buff_cnt, frame_buff, len); // frame content.
-                    memcpy(buff, &total_frms, 4);
+                    ikcp_set32u(buff, total_frms);
+                    // memcpy(buff, &total_frms, 4);
                     buff_cnt += len;
                 }else{
                     memcpy(buff, frame_buff, len);

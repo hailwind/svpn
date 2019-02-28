@@ -2,19 +2,28 @@ svpn: prepare buildlib server client
 
 prepare:
 	if [ ! -d bin ]; then mkdir bin; fi;
+
 ifndef $(ARCH)
 ARCH=x86
 endif
+
 ifeq ($(ARCH),x86)
 CC:=/usr/bin/gcc
-else
-export STAGING_DIR=/home/alexw/workspace/openwrt/staging_dir/target-mipsel_24kc_musl
-CC := /home/alexw/workspace/openwrt/staging_dir/toolchain-mipsel_24kc_gcc-7.4.0_musl/bin/mipsel-openwrt-linux-gcc
+endif
+
+ifeq ($(ARCH),mipsel)
+export STAGING_DIR=/home/alexw/openwrt-sdk-18.06.2-ramips-mt7620_gcc-7.3.0_musl.Linux-x86_64/staging_dir/target-mipsel_24kc_musl/
+CC := /home/alexw/openwrt-sdk-18.06.2-ramips-mt7620_gcc-7.3.0_musl.Linux-x86_64/staging_dir/toolchain-mipsel_24kc_gcc-7.3.0_musl/bin/mipsel-openwrt-linux-musl-gcc
+endif
+
+ifeq ($(ARCH),mips)
+export STAGING_DIR=/home/alexw/openwrt-sdk-18.06.2-ar71xx-generic_gcc-7.3.0_musl.Linux-x86_64/staging_dir/target-mips_24kc_musl
+CC := /home/alexw/openwrt-sdk-18.06.2-ar71xx-generic_gcc-7.3.0_musl.Linux-x86_64/staging_dir/toolchain-mips_24kc_gcc-7.3.0_musl/bin/mips-openwrt-linux-musl-gcc
+CFLAGS := -DIWORDS_BIG_ENDIAN=1
 endif
 
 server: common.o server.o
 	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/server.o bin/common.o bin/ikcp.o -o bin/svpn_server_$(ARCH)
-
 
 client: common.o client.o
 	$(CC) -g -rdynamic -lmcrypt -llz4 -lpthread bin/client.o bin/common.o bin/ikcp.o -o bin/svpn_client_$(ARCH)
@@ -32,7 +41,7 @@ buildlib: ikcp.o
 	echo "lib compiled."
 
 ikcp.o:
-	$(CC) -g -rdynamic -c src/lib/ikcp.c -o bin/ikcp.o
+	$(CC) $(CFLAGS)  -g -rdynamic -c src/lib/ikcp.c -o bin/ikcp.o
 
 deb:
 	mkdir -p chroot/opt/sedge/vpn

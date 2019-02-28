@@ -1271,4 +1271,20 @@ IUINT32 ikcp_getconv(const void *ptr)
 	return conv;
 }
 
+// set conv
+void ikcp_setconv(void *ptr, IUINT32 conv)
+{
+	ikcp_encode32u(ptr, conv);
+}
 
+/* encode 32 bits unsigned int (lsb) */
+void ikcp_set32u(char *p, IUINT32 l){
+	ikcp_encode32u(p, l);
+}
+
+/* decode 32 bits unsigned int (lsb) */
+IUINT32 ikcp_get32u(char *p){
+	IUINT32 conv;
+	ikcp_decode32u(p, &conv);
+	return conv;
+}

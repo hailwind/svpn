@@ -78,7 +78,7 @@ int main(int argc, char *argv[]) {
     char *server_addr=NULL;
     int server_port = DEFAULT_SERVER_PORT;
     int role=CLIENT; 
-    char mode='d';
+    char mode='1';
     char *mode_params=NULL;
     int minrto=RX_MINRTO;
     int cpu_affinity = 0;

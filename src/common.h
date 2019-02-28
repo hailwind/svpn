@@ -93,7 +93,7 @@ struct _kcpsess_st
     int dead;
     
     ikcpcb *kcp;
-    int conv;
+    uint32_t conv;
 
     char key[64];
 
@@ -159,7 +159,7 @@ int new_socket_port();
 
 int binding(char *bind_addr, int port);
 
-kcpsess_t *init_kcpsess(int conv, int dev_fd, char *key);
+kcpsess_t *init_kcpsess(uint32_t conv, int dev_fd, char *key);
 
 int udp_output(const char *buf, int len, ikcpcb *kcp, void *user);
 
